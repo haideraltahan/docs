@@ -1,0 +1,219 @@
+---
+title: "Understanding Mill Evaluation Results and Output Files"
+sidebarTitle: "Outputs"
+description: "Learn where Mill stores results, how to read the output format, and how to load, export, and analyze evaluation results using the CLI or Python."
+---
+
+Every time Mill completes an evaluation run, it writes structured results to disk and makes them available through both a CLI summary command and a Python API. Understanding the output format helps you compare models across benchmarks, share results with collaborators, and feed evaluation data into downstream analysis pipelines. This page explains exactly where results land, what they look like, and how to work with them programmatically.
+
+## Where Results Are Stored
+
+By default, Mill writes all evaluation results to `~/.cache/mill/results`. You can override this location by setting the `output_dir` parameter in your config file, as a CLI flag, or as a Python argument:
+
+```bash
+mill evaluate --output_dir ./experiments/run-001/results
+```
+
+Inside `output_dir`, Mill organizes files by model and benchmark:
+
+```
+output_dir/
+├── clip/
+│   ├── mmbench.json
+│   ├── seedbench.json
+│   └── mmstar.json
+├── blip2/
+│   ├── mmbench.json
+│   ├── seedbench.json
+│   └── mmstar.json
+└── run_summary.json
+```
+
+Each model gets its own subdirectory, and each benchmark produces a separate JSON file. The top-level `run_summary.json` aggregates scores across all models and benchmarks evaluated in the same run.
+
+<Note>
+  Mill also writes intermediate checkpoint files during long evaluations (controlled by `save_freq`). These are named with a `.partial` suffix and are automatically cleaned up when the run completes successfully.
+</Note>
+
+## Output File Format
+
+Each per-benchmark JSON file follows a consistent schema. The file contains the model name, benchmark name, overall score, per-sample predictions, and metadata about the run configuration:
+
+```json
+{
+  "model": "clip",
+  "benchmark": "mmbench",
+  "score": 78.4,
+  "num_samples": 3000,
+  "config": {
+    "batch_size": 32,
+    "device": "cuda",
+    "seed": 42
+  },
+  "samples": [
+    {
+      "id": "mmbench_0001",
+      "prediction": "A",
+      "ground_truth": "A",
+      "correct": true
+    },
+    {
+      "id": "mmbench_0002",
+      "prediction": "B",
+      "ground_truth": "C",
+      "correct": false
+    }
+  ]
+}
+```
+
+The `run_summary.json` file provides a condensed view across all models and benchmarks evaluated in the same run:
+
+```json
+{
+  "run_id": "20240815-143022",
+  "seed": 42,
+  "results": [
+    { "model": "clip",  "benchmark": "mmbench",   "score": 78.4 },
+    { "model": "clip",  "benchmark": "seedbench",  "score": 65.1 },
+    { "model": "blip2", "benchmark": "mmbench",   "score": 82.7 },
+    { "model": "blip2", "benchmark": "seedbench",  "score": 71.3 }
+  ]
+}
+```
+
+## Viewing Results in the CLI
+
+Use `mill show-results` to print a formatted summary table directly in your terminal. By default it reads from `~/.cache/mill/results`; pass `--output_dir` to point it at a different location:
+
+```bash
+mill show-results --output_dir ./experiments/run-001/results
+```
+
+This produces a table like the following:
+
+```
+┌───────────┬─────────────┬─────────┐
+│ Model     │ Benchmark   │  Score  │
+├───────────┼─────────────┼─────────┤
+│ clip      │ mmbench     │  78.40  │
+│ clip      │ seedbench   │  65.10  │
+│ blip2     │ mmbench     │  82.70  │
+│ blip2     │ seedbench   │  71.30  │
+└───────────┴─────────────┴─────────┘
+```
+
+<Tip>
+  Add `--sort-by score` to rank models from best to worst on a given benchmark, or `--benchmark mmbench` to filter the table to a single benchmark.
+</Tip>
+
+## Loading Results in Python
+
+Mill's Python API lets you load results into a `Results` object that exposes convenient export and analysis methods. Import `mill.results` and call `load()` with the path to your output directory:
+
+```python
+import mill.results as mr
+
+results = mr.load("./experiments/run-001/results")
+```
+
+### Exporting to a DataFrame
+
+Call `to_dataframe()` to get a pandas DataFrame with one row per (model, benchmark) pair. This is the fastest way to feed results into Jupyter notebooks or statistical analyses:
+
+```python
+df = results.to_dataframe()
+print(df)
+```
+
+```
+     model   benchmark  score
+0     clip     mmbench  78.40
+1     clip   seedbench  65.10
+2    blip2     mmbench  82.70
+3    blip2   seedbench  71.30
+```
+
+### Exporting to JSON
+
+Call `to_json()` to serialize the full results object — including per-sample predictions — to a JSON string or file:
+
+```python
+# Print as a JSON string
+print(results.to_json(indent=2))
+
+# Save to a file
+results.to_json(path="./exports/results.json")
+```
+
+### Printing a Summary
+
+Call `summary()` to get a concise text summary of aggregate scores, equivalent to what `mill show-results` prints in the CLI:
+
+```python
+print(results.summary())
+```
+
+### Filtering Results
+
+Chain filter calls to focus on a subset of models or benchmarks before exporting:
+
+```python
+df = (
+    results
+    .filter(models=["blip2"])
+    .filter(benchmarks=["mmbench"])
+    .to_dataframe()
+)
+```
+
+## Downloading Precomputed Results
+
+If you want to compare your models against published baselines without re-running evaluations, Mill provides a command to download precomputed results for official model checkpoints:
+
+```bash
+mill download-results --models clip,blip2 --benchmarks mmbench,seedbench
+```
+
+Downloaded results are stored in `output_dir` alongside any results you generate yourself and are immediately accessible via `mill show-results` and `mr.load()`.
+
+<Warning>
+  Precomputed results are tied to specific model checkpoints and evaluation configurations. Always verify that the `config` block in a downloaded result file matches your intended comparison setup before drawing conclusions.
+</Warning>
+
+## Full Analysis Example
+
+The following script loads results, computes per-benchmark rankings, and exports a final CSV — a typical post-evaluation workflow:
+
+```python
+import mill.results as mr
+import pandas as pd
+
+# Load results from a completed run
+results = mr.load("./experiments/run-001/results")
+
+# Convert to DataFrame
+df = results.to_dataframe()
+
+# Rank models per benchmark by score descending
+df["rank"] = df.groupby("benchmark")["score"].rank(ascending=False, method="min")
+
+# Pivot for a clean comparison table
+pivot = df.pivot(index="model", columns="benchmark", values="score")
+print(pivot)
+
+# Export to CSV
+pivot.to_csv("./exports/comparison_table.csv")
+```
+
+<CodeGroup>
+  ```bash CLI
+  mill show-results --output_dir ./experiments/run-001/results --sort-by score
+  ```
+
+  ```python Python
+  import mill.results as mr
+  results = mr.load("./experiments/run-001/results")
+  print(results.summary())
+  ```
+</CodeGroup>

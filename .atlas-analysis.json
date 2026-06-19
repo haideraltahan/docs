@@ -1,0 +1,77 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "Mill",
+  "projectDescription": "Mill is a unified evaluation pipeline that benchmarks AI models across every modality — text, image, video, audio, and beyond — in a single, consistent workflow.",
+  "theme": "luma",
+  "primaryColor": "#040404",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/overview",
+              "concepts/modalities",
+              "concepts/benchmarks",
+              "concepts/models"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/evaluate-models",
+              "guides/add-benchmark",
+              "guides/add-model",
+              "guides/custom-metrics"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/pipeline",
+              "configuration/outputs"
+            ]
+          },
+          {
+            "group": "Help",
+            "pages": [
+              "help/faq",
+              "help/troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Unified evaluation pipeline spanning text, image, video, and audio modalities",
+    "Single consistent interface for running benchmarks across model types",
+    "Extensible benchmark and model registration system",
+    "Reproducible, deterministic evaluation results",
+    "Custom metric support",
+    "Pre-computed results for fast analysis without re-running evaluations"
+  ],
+  "publicApiSurface": [
+    "mill evaluate",
+    "mill list-models",
+    "mill list-benchmarks",
+    "mill show-results",
+    "Evaluator class",
+    "Evaluator.evaluate()",
+    "benchmark registration API",
+    "model registration API",
+    "custom metric interface"
+  ]
+}

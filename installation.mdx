@@ -1,0 +1,192 @@
+---
+title: "Mill Installation: Requirements, Extras, and Setup Guide"
+sidebarTitle: "Installation"
+description: "Install Mill via pip or from source. Covers Python and pip requirements, optional modality extras for vision, audio, and video, and a verification step."
+---
+
+Mill runs on Python 3.9 and above and installs like any standard Python package. You can get the latest stable release from PyPI in seconds, pull a specific version, or build directly from source when you need the latest unreleased changes. This page covers every supported installation path along with optional extras for individual modalities and guidance on GPU configuration.
+
+## Requirements
+
+Before installing Mill, confirm your environment meets the following baseline requirements.
+
+| Requirement | Minimum Version |
+|---|---|
+| Python | 3.9 |
+| pip | 21.0 |
+| OS | Linux, macOS, Windows (WSL2 recommended) |
+
+<Note>
+  GPU acceleration is optional for lightweight evaluations but strongly recommended when running large vision, video, or audio models. See [GPU and CUDA Setup](#gpu-and-cuda-setup) below.
+</Note>
+
+## Install Mill
+
+Choose the installation method that fits your workflow.
+
+<CodeGroup>
+  ```bash pip
+  pip install mill
+  ```
+
+  ```bash pip (pinned version)
+  pip install "mill==<version>"
+  ```
+
+  ```bash Source (development)
+  git clone https://github.com/haider-altahan/mill.git
+  cd mill
+  pip install -e .
+  ```
+</CodeGroup>
+
+<Tip>
+  Use a virtual environment to keep your Mill installation isolated. Run `python -m venv .venv && source .venv/bin/activate` (Linux/macOS) or `.venv\Scripts\activate` (Windows) before installing.
+</Tip>
+
+## Optional Modality Extras
+
+The base `mill` package installs the core evaluation framework and text evaluation support. Extras for other modalities pull in the additional dependencies — model runtimes, dataset loaders, and codec libraries — required to evaluate image, audio, and video models.
+
+Install only the extras you need to keep your environment lean.
+
+<Tabs>
+  <Tab title="Vision (Image)">
+    Adds support for image classification, object detection, and segmentation benchmarks.
+
+    ```bash
+    pip install "mill[vision]"
+    ```
+
+    Includes: `Pillow`, `torchvision`, `timm`, `pycocotools`
+  </Tab>
+  <Tab title="Audio">
+    Adds support for speech recognition, audio classification, and sound event detection benchmarks.
+
+    ```bash
+    pip install "mill[audio]"
+    ```
+
+    Includes: `torchaudio`, `librosa`, `soundfile`, `jiwer`
+  </Tab>
+  <Tab title="Video">
+    Adds support for action recognition, temporal segmentation, and video captioning benchmarks.
+
+    ```bash
+    pip install "mill[video]"
+    ```
+
+    Includes: `decord`, `av`, `torchvision` (with video support)
+  </Tab>
+  <Tab title="All Modalities">
+    Installs every optional extra at once — the easiest path if you plan to evaluate across multiple modalities.
+
+    ```bash
+    pip install "mill[all]"
+    ```
+  </Tab>
+</Tabs>
+
+### Combining Extras
+
+You can combine multiple extras in a single install command using a comma-separated list.
+
+```bash
+pip install "mill[vision,audio]"
+```
+
+## Verify Your Installation
+
+After installation, confirm that Mill is correctly set up using either the CLI or Python.
+
+<CodeGroup>
+  ```bash CLI
+  mill --version
+  ```
+
+  ```python Python
+  import mill
+  print(mill.__version__)
+  ```
+</CodeGroup>
+
+Both commands should print the installed version string, for example `mill 0.4.0`.
+
+Run a quick sanity check to confirm Mill can discover its built-in benchmarks and models.
+
+```bash
+mill list-benchmarks
+mill list-models
+```
+
+If these commands return formatted output without errors, your installation is ready to use.
+
+## GPU and CUDA Setup
+
+The base Mill installation works on CPU, but evaluating large image, audio, or video models at scale requires a CUDA-capable GPU.
+
+<Warning>
+  Mill does not install CUDA or GPU drivers automatically. You must install them separately before installing Mill's modality extras.
+</Warning>
+
+### Recommended Setup
+
+1. **Install CUDA Toolkit** — Download the version matching your GPU drivers from [developer.nvidia.com/cuda-downloads](https://developer.nvidia.com/cuda-downloads). CUDA 11.8 or CUDA 12.x are both supported.
+
+2. **Install the GPU-enabled PyTorch build** — Replace the default PyTorch with a CUDA-aware wheel before installing Mill.
+
+   ```bash
+   # CUDA 12.1 example — check pytorch.org for the right command for your CUDA version
+   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+   ```
+
+3. **Install Mill with your chosen extras** — After PyTorch is in place, install Mill as normal.
+
+   ```bash
+   pip install "mill[all]"
+   ```
+
+4. **Confirm GPU visibility** — Verify that PyTorch can see your GPU.
+
+   ```python
+   import torch
+   print(torch.cuda.is_available())      # True
+   print(torch.cuda.get_device_name(0))  # e.g. NVIDIA A100 80GB PCIe
+   ```
+
+<Tip>
+  If you are running Mill in a cloud environment (e.g., AWS, GCP, Azure), use a GPU-optimised base image that ships with the correct CUDA version pre-installed. This avoids driver compatibility issues.
+</Tip>
+
+## Installing from Source
+
+Installing from source gives you access to the latest unreleased features and lets you make changes to Mill's source code directly. Use the editable (`-e`) flag so any local modifications are reflected immediately without reinstalling.
+
+```bash
+git clone https://github.com/haider-altahan/mill.git
+cd mill
+pip install -e ".[all]"
+```
+
+To include development dependencies (linting, testing, docs):
+
+```bash
+pip install -e ".[dev]"
+```
+
+<Note>
+  Source installs track the `main` branch, which may include breaking changes. If you need stability, install a tagged release from PyPI instead.
+</Note>
+
+## Next Steps
+
+With Mill installed and verified, you are ready to run your first evaluation.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first evaluation using the CLI or Python API in under five minutes.
+  </Card>
+  <Card title="Concepts Overview" icon="map" href="/concepts/overview">
+    Learn how Mill's benchmarks, models, and evaluators fit together.
+  </Card>
+</CardGroup>

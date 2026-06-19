@@ -1,0 +1,158 @@
+---
+title: "Mill Frequently Asked Questions: Features and Usage Guide"
+sidebarTitle: "FAQ"
+description: "Answers to frequent Mill questions about supported modalities, GPU requirements, adding models and benchmarks, results storage, and reproducibility."
+---
+
+Mill is designed to be straightforward to use, but a few questions come up frequently — especially around supported modalities, GPU requirements, custom models and benchmarks, and reproducibility. The answers below cover the most common questions from new and returning users. If you don't find what you're looking for here, check the [Troubleshooting](/help/troubleshooting) page or open an issue on the Mill GitHub repository.
+
+<AccordionGroup>
+  <Accordion title="What modalities does Mill support?">
+    Mill supports four modalities out of the box: **text**, **image**, **video**, and **audio**. You can evaluate models that process a single modality (e.g., a language model on text benchmarks) as well as multimodal models that combine two or more modalities (e.g., a vision-language model on image-text benchmarks).
+
+    Run `mill list-benchmarks` to see all available benchmarks grouped by modality. The list grows with each release as new benchmarks are contributed by the community.
+  </Accordion>
+
+  <Accordion title="How do I evaluate only specific models or benchmarks?">
+    Pass a comma-separated list of names to `--models` and `--benchmarks` on the CLI, or supply Python lists to `Evaluator.evaluate()`:
+
+    ```bash
+    mill evaluate --models clip,blip2 --benchmarks mmbench,seedbench
+    ```
+
+    ```python
+    from mill import Evaluator
+
+    evaluator = Evaluator(
+        models=["clip", "blip2"],
+        benchmarks=["mmbench", "seedbench"],
+    )
+    results = evaluator.evaluate()
+    ```
+
+    Use `mill list-models` and `mill list-benchmarks` to discover the exact registered names to use.
+  </Accordion>
+
+  <Accordion title="Can I use Mill without a GPU?">
+    Yes. Mill runs on CPU when no CUDA-capable GPU is detected, and you can force CPU mode explicitly with `--device cpu`. Keep in mind that running large models on CPU can be significantly slower than on a GPU.
+
+    For quick experiments or debugging, consider limiting the run to a small model and a single benchmark to keep evaluation time manageable on CPU:
+
+    ```bash
+    mill evaluate --models clip --benchmarks mmbench --device cpu
+    ```
+  </Accordion>
+
+  <Accordion title="How do I add my own model?">
+    You can register a custom model by subclassing `mill.models.BaseModel` and implementing the required interface. Once registered, your model becomes available to `mill evaluate` just like any built-in model.
+
+    ```python
+    import mill
+
+    @mill.register_model("my-custom-model")
+    class MyModel(mill.models.BaseModel):
+        def load(self):
+            # Load your model weights here
+            ...
+
+        def predict(self, batch):
+            # Return predictions for a batch of inputs
+            ...
+    ```
+
+    After defining your class, run:
+
+    ```bash
+    mill evaluate --models my-custom-model --benchmarks mmbench
+    ```
+
+    See the [Add a Model](/guides/add-model) guide for a full walkthrough including multi-modal inputs and batching best practices.
+  </Accordion>
+
+  <Accordion title="How do I add my own benchmark?">
+    Register a custom benchmark by subclassing `mill.benchmarks.BaseBenchmark` and implementing the data loading and scoring methods:
+
+    ```python
+    import mill
+
+    @mill.register_benchmark("my-benchmark")
+    class MyBenchmark(mill.benchmarks.BaseBenchmark):
+        def load_data(self):
+            # Return an iterable of samples
+            ...
+
+        def score(self, predictions, ground_truths):
+            # Return a scalar score
+            ...
+    ```
+
+    Once registered, pass `--benchmarks my-benchmark` to `mill evaluate` to include it in any evaluation run. See the [Add a Benchmark](/guides/add-benchmark) guide for details on dataset formats and evaluation metrics.
+  </Accordion>
+
+  <Accordion title="Where are my evaluation results saved?">
+    By default, Mill saves all results to `~/.cache/mill/results`. You can change this with the `output_dir` parameter:
+
+    ```bash
+    mill evaluate --output_dir ./my-results
+    ```
+
+    Inside `output_dir`, results are organized into per-model subdirectories, with one JSON file per benchmark. A top-level `run_summary.json` aggregates all scores from the run. See the [Outputs](/configuration/outputs) page for a full description of the file structure and format.
+  </Accordion>
+
+  <Accordion title="How do I reproduce someone else's results with Mill?">
+    To reproduce a published result, you need three things: the same model checkpoint, the same benchmark dataset version, and the same run configuration — especially the `seed` value.
+
+    If the author has shared a `mill.yaml` config file, run it directly:
+
+    ```bash
+    mill evaluate --config mill.yaml
+    ```
+
+    If you only have the reported numbers, match the `seed`, `batch_size`, and `device` settings manually. You can also download official precomputed results for built-in checkpoints without re-running evaluations:
+
+    ```bash
+    mill download-results --models clip --benchmarks mmbench
+    ```
+
+    <Tip>
+      Always record and share your `mill.yaml` alongside published results so others can reproduce your work with a single command.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="Does Mill support distributed or multi-GPU evaluation?">
+    Yes. Mill supports multi-GPU evaluation through PyTorch's distributed data-parallel backend. Launch a distributed run using `torchrun`:
+
+    ```bash
+    torchrun --nproc_per_node=4 -m mill evaluate \
+      --models blip2 \
+      --benchmarks mmbench \
+      --batch_per_gpu 16
+    ```
+
+    Use `batch_per_gpu` instead of `batch_size` when running distributed so that each GPU receives a consistent per-device workload regardless of the total number of GPUs. Mill handles result aggregation automatically at the end of the run.
+  </Accordion>
+
+  <Accordion title="How do I update Mill to the latest version?">
+    Update Mill using pip:
+
+    ```bash
+    pip install --upgrade mill
+    ```
+
+    To check your current version:
+
+    ```bash
+    mill --version
+    ```
+
+    <Warning>
+      Major version upgrades may introduce breaking changes to the Python API or config file schema. Review the [changelog](https://github.com/haider-al-tahan/mill/releases) before upgrading in a production environment, and consider testing in a fresh virtual environment first.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Can I use Mill with private or proprietary datasets?">
+    Yes. Mill's benchmark registration system works with any dataset you can load in Python — there is no requirement to use publicly available data. Register your private dataset as a custom benchmark (see *How do I add my own benchmark?* above) and point the data loader at your local files or internal storage.
+
+    If your dataset is sensitive, make sure `output_dir` and `benchmarks_dir` are set to paths with appropriate access controls, and avoid committing raw data or per-sample predictions to public repositories.
+  </Accordion>
+</AccordionGroup>

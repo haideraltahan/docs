@@ -1,0 +1,306 @@
+---
+title: "Define and Register Custom Evaluation Metrics in Mill"
+sidebarTitle: "Custom Metrics"
+description: "Create and register custom evaluation metrics in Mill. Implement the Metric interface to score model outputs against ground truth with any logic you need."
+---
+
+A metric in Mill is a callable that receives a list of model predictions and a corresponding list of ground-truth references, then returns a dictionary of named scores. Mill's built-in metrics cover standard tasks — accuracy, F1, BLEU, ROUGE — but you will often need domain-specific scoring logic: partial-credit matching, embedding similarity, task-specific rubrics, or composite scores that combine multiple signals. The `Metric` interface and `@register_metric` decorator let you plug any scoring function into the pipeline without touching benchmark or model code.
+
+## What a metric does
+
+When an evaluation run completes, Mill calls each metric registered with the active benchmark and collects the returned scores into the results object. A metric receives:
+
+- `predictions` — the raw outputs returned by the model's `predict` method, in the same order as the benchmark samples.
+- `references` — the ground-truth labels from `BenchmarkDataset`, in the same order.
+
+It must return a `dict[str, float]` where each key becomes a named column in the results table.
+
+<Steps>
+
+<Step title="Create a file for your metric">
+
+Create a Python file to hold your metric class. Any importable path works; a sensible convention is `metrics/my_metric.py`.
+
+```bash
+touch metrics/my_metric.py
+```
+
+Add the file to your `mill.toml` so Mill imports it automatically before every run.
+
+```toml
+# mill.toml
+[plugins]
+metrics = [
+    "metrics.my_metric",
+]
+```
+
+</Step>
+
+<Step title="Implement the Metric base class">
+
+Subclass `mill.Metric` and implement `compute`. The decorator registers the class under its `name` slug.
+
+```python
+# metrics/my_metric.py
+from __future__ import annotations
+
+from typing import Any
+import mill
+from mill import Metric
+
+
+@mill.register_metric
+class TopKAccuracy(Metric):
+    """Computes top-1 and top-5 accuracy for classification tasks."""
+
+    name = "top-k-accuracy"
+    description = "Top-1 and top-5 accuracy for multi-class classification."
+
+    def compute(
+        self,
+        predictions: list[Any],
+        references: list[Any],
+    ) -> dict[str, float]:
+        """Score predictions against references.
+
+        Args:
+            predictions: Each element should be a list of class labels
+                         sorted by descending confidence (most likely first).
+                         If your model returns a single label, wrap it in a list.
+            references:  Ground-truth class labels, one per sample.
+
+        Returns:
+            A dict with 'top1_accuracy' and 'top5_accuracy' keys.
+        """
+        top1_correct = 0
+        top5_correct = 0
+        total = len(references)
+
+        for preds, ref in zip(predictions, references):
+            # Accept either a ranked list or a single prediction
+            ranked = preds if isinstance(preds, list) else [preds]
+            if ranked[0] == ref:
+                top1_correct += 1
+            if ref in ranked[:5]:
+                top5_correct += 1
+
+        return {
+            "top1_accuracy": top1_correct / total,
+            "top5_accuracy": top5_correct / total,
+        }
+```
+
+Key points about `compute`:
+
+| Aspect | Requirement |
+|---|---|
+| Signature | `compute(self, predictions, references) -> dict[str, float]` |
+| Return type | `dict[str, float]` — each key becomes a result column |
+| Ordering | `predictions[i]` must correspond to `references[i]` |
+| Side effects | Avoid; metrics may be called in parallel across benchmark shards |
+
+</Step>
+
+<Step title="Use the @register_metric decorator">
+
+The decorator pattern is the simplest path, but you can also register a plain function using `mill.register_metric` as a function call:
+
+```python
+# Functional style — useful for simple one-off metrics
+from mill import register_metric
+
+def word_error_rate(predictions: list[str], references: list[str]) -> dict[str, float]:
+    """Character-level word error rate for transcription tasks."""
+    total_words = 0
+    total_errors = 0
+
+    for pred, ref in zip(predictions, references):
+        ref_words = ref.split()
+        pred_words = pred.split()
+        total_words += len(ref_words)
+        # Simple substitution count for illustration
+        total_errors += sum(p != r for p, r in zip(pred_words, ref_words))
+        total_errors += abs(len(pred_words) - len(ref_words))
+
+    wer = total_errors / max(total_words, 1)
+    return {"wer": wer, "word_accuracy": 1.0 - wer}
+
+register_metric(word_error_rate, name="word-error-rate")
+```
+
+<Note>
+Metric slugs must be unique across all registered metrics. Mill raises a `DuplicateMetricError` at import time if two metrics share the same `name`.
+</Note>
+
+</Step>
+
+<Step title="Attach the metric to a benchmark">
+
+Metrics are attached to benchmarks via the `metrics` class attribute or by passing them to the benchmark constructor. The benchmark calls each attached metric automatically after inference.
+
+```python
+# benchmarks/my_benchmark.py
+from __future__ import annotations
+import mill
+from mill import Benchmark, BenchmarkDataset
+
+# Import ensures @register_metric fires before benchmark is constructed
+import metrics.my_metric
+
+
+@mill.register_benchmark
+class MyClassificationBenchmark(Benchmark):
+    name = "my-classification"
+    modality = "image"
+    version = "1.0.0"
+
+    # Attach metrics by slug — Mill resolves them from the registry
+    metrics = ["top-k-accuracy"]
+
+    def load_data(self) -> BenchmarkDataset:
+        from my_company.data import load_test_images
+        return BenchmarkDataset(samples=load_test_images())
+
+    def evaluate(self, predictions, references):
+        # Delegate entirely to the registered metrics
+        return self.compute_metrics(predictions, references)
+```
+
+You can attach multiple metrics to a single benchmark:
+
+```python
+metrics = ["top-k-accuracy", "word-error-rate", "my-custom-metric"]
+```
+
+Mill merges all returned dicts into one flat result dictionary per benchmark.
+
+<Tip>
+Call `self.compute_metrics(predictions, references)` in `Benchmark.evaluate` to run all attached metrics automatically and merge their results. You can still add extra keys to the returned dict for benchmark-specific scores.
+</Tip>
+
+</Step>
+
+<Step title="Return structured results">
+
+The dict you return from `compute` becomes the authoritative source of truth for that metric in the results object. Follow these conventions for clean, comparable results:
+
+```python
+def compute(self, predictions, references) -> dict[str, float]:
+    # ✅ Use snake_case keys
+    # ✅ Normalize scores to [0, 1] where possible
+    # ✅ Include a primary metric your team cares about most
+    # ✅ Add supporting metrics for debugging
+    return {
+        "accuracy":       overall_accuracy,    # primary metric
+        "precision_macro": precision,
+        "recall_macro":    recall,
+        "f1_macro":        f1,
+    }
+```
+
+<Warning>
+All values in the returned dict must be Python `float` (or coercible to float). Returning tensors, numpy scalars, or complex types will cause a serialisation error when Mill writes the JSON results file.
+</Warning>
+
+</Step>
+
+</Steps>
+
+## Complete example: custom accuracy metric for a classification task
+
+The following self-contained example defines a per-class accuracy metric and attaches it to a minimal benchmark.
+
+```python
+# custom_metrics_example.py
+from __future__ import annotations
+
+from collections import defaultdict
+from typing import Any
+
+import mill
+from mill import Metric, Benchmark, BenchmarkDataset, Sample, Evaluator
+
+
+# ── 1. Define the metric ────────────────────────────────────────────────────
+
+@mill.register_metric
+class PerClassAccuracy(Metric):
+    """Reports overall accuracy plus per-class breakdown."""
+
+    name = "per-class-accuracy"
+    description = "Overall and per-class accuracy for classification tasks."
+
+    def compute(
+        self,
+        predictions: list[Any],
+        references: list[Any],
+    ) -> dict[str, float]:
+        class_total: dict[str, int]   = defaultdict(int)
+        class_correct: dict[str, int] = defaultdict(int)
+
+        for pred, ref in zip(predictions, references):
+            class_total[ref] += 1
+            if pred == ref:
+                class_correct[ref] += 1
+
+        overall = sum(class_correct.values()) / max(len(references), 1)
+        results: dict[str, float] = {"accuracy": overall}
+
+        for cls in sorted(class_total):
+            results[f"accuracy_{cls}"] = class_correct[cls] / class_total[cls]
+
+        return results
+
+
+# ── 2. Define a benchmark that uses the metric ──────────────────────────────
+
+@mill.register_benchmark
+class ToyColorBenchmark(Benchmark):
+    """Tiny color-classification benchmark for testing custom metrics."""
+
+    name = "toy-color-classification"
+    modality = "text"
+    version = "0.1.0"
+    metrics = ["per-class-accuracy"]
+
+    def load_data(self) -> BenchmarkDataset:
+        samples = [
+            Sample(input="The sky is blue.",       label="blue"),
+            Sample(input="Roses are red.",          label="red"),
+            Sample(input="Grass is green.",         label="green"),
+            Sample(input="The ocean looks blue.",   label="blue"),
+            Sample(input="Fire trucks are red.",    label="red"),
+        ]
+        return BenchmarkDataset(samples=samples)
+
+    def evaluate(self, predictions, references) -> dict[str, float]:
+        return self.compute_metrics(predictions, references)
+
+
+# ── 3. Run the evaluation ───────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    evaluator = Evaluator(
+        models=["gpt2"],
+        benchmarks=["toy-color-classification"],
+        output_dir="./results/color-run",
+    )
+
+    results = evaluator.evaluate()
+    print(results.summary())
+    # Example output:
+    # benchmark                  accuracy  accuracy_blue  accuracy_green  accuracy_red
+    # toy-color-classification   0.80      1.00           1.00            0.50
+```
+
+```bash
+python custom_metrics_example.py
+```
+
+## Tips for reliable metrics
+
+- **Keep metrics stateless.** Do not accumulate state across `compute` calls; Mill may call your metric multiple times during cross-validation or bootstrapped evaluation.
+- **Handle edge cases.** Guard against empty `predictions` or `references` lists and division by zero — Mill does not pre-validate inputs.
+- **Document units.** Add a docstring or `description` attribute clarifying whether scores are percentages, fractions, or raw counts so downstream consumers of the results file know how to interpret them.
+- **Prefer standard keys.** Where your metric matches a well-known name (`accuracy`, `f1`, `bleu`, `rouge1`, etc.), use that key so Mill's comparison tooling can align scores across benchmarks automatically.

@@ -1,0 +1,87 @@
+---
+title: "Supported Modalities in Mill's Evaluation Pipeline"
+sidebarTitle: "Modalities"
+description: "Mill supports text, image, video, and audio modalities. Learn how each modality is handled and how to target specific ones in your evaluation runs."
+---
+
+A modality in Mill describes the type of input data a benchmark works with and, by extension, the kind of model capable of being evaluated against it. Declaring a modality is how Mill knows which data loader to use, how to preprocess inputs before passing them to a model, and how to validate that a given model and benchmark are compatible. Because every benchmark carries a modality declaration, you never need to configure data pipelines by hand — Mill handles all of that automatically based on the modality you assign.
+
+## Supported Modalities
+
+Mill currently supports four modalities out of the box.
+
+| Modality | Description | Example Benchmark Types |
+|----------|-------------|------------------------|
+| `text` | Natural language input: sentences, passages, documents, or structured prompts | Question answering, summarization, classification, language modeling |
+| `image` | Static raster images in standard formats (JPEG, PNG, WebP, etc.) | Image classification, object detection, visual question answering, captioning |
+| `video` | Temporal sequences of frames, with or without an audio track | Action recognition, video captioning, temporal reasoning, retrieval |
+| `audio` | Raw audio waveforms or spectrograms (WAV, FLAC, MP3, etc.) | Speech recognition, speaker identification, audio classification, sound event detection |
+
+## A Consistent Interface Across All Modalities
+
+One of Mill's core design goals is that switching between modalities should not require you to learn a new workflow. Whether you are running a text classification benchmark or a video understanding benchmark, the commands, configuration keys, and result formats are identical. Mill handles each modality's loading and preprocessing automatically, so you work through the same interface regardless of the data type.
+
+From your perspective as a user, a multi-modality evaluation run looks no different from a single-modality one:
+
+```yaml
+models:
+  - name: my-text-model
+  - name: my-image-model
+
+benchmarks:
+  - name: squad_v2          # text modality
+  - name: imagenet_top5     # image modality
+```
+
+Mill resolves the modality of each benchmark, applies the correct data pipeline, and routes each model–benchmark pair through inference — all without additional configuration from you.
+
+## How Data Loading Works Per Modality
+
+Mill's per-modality data pipelines take care of the details that differ between data types. Here is what each pipeline manages on your behalf.
+
+<Accordion title="Text">
+  The text handler tokenizes raw strings according to the model's tokenizer configuration, manages sequence length truncation and padding, and handles dataset formats including plain text files, JSONL, and HuggingFace `datasets` objects. You provide the benchmark name; Mill locates and streams the dataset automatically.
+</Accordion>
+
+<Accordion title="Image">
+  The image handler decodes image files from disk or remote storage, applies resize and normalization transforms appropriate for the target model, and batches images into tensors. Supported source formats include JPEG, PNG, WebP, and BMP. Dataset manifests in CSV, JSON, and HuggingFace `datasets` format are all recognized.
+</Accordion>
+
+<Accordion title="Video">
+  The video handler samples frames at a configurable rate, decodes them using an efficient frame-extraction backend, and optionally extracts the accompanying audio stream when a benchmark requires it. Mill manages memory carefully for video data, streaming frames in chunks rather than loading entire clips into memory at once.
+</Accordion>
+
+<Accordion title="Audio">
+  The audio handler resamples waveforms to a target sample rate, converts between mono and multi-channel where needed, and optionally computes spectrograms or mel filterbank features before passing data to the model. WAV, FLAC, MP3, and OGG source formats are supported.
+</Accordion>
+
+## Targeting a Specific Modality in a Run
+
+You can scope an evaluation run to one or more modalities using the `--modality` flag. This is useful when you want to iterate quickly on a subset of your benchmarks without running the full suite.
+
+```bash
+# Evaluate only text and audio benchmarks
+mill evaluate --config eval.yaml --modality text --modality audio
+```
+
+When you pass `--modality`, Mill skips any benchmark whose declared modality is not in your list. Models that have no compatible benchmarks remaining after filtering are also skipped, and Mill logs a notice for each one so nothing is silently dropped.
+
+<Tip>
+  Use `mill list-benchmarks --modality image` to see all registered benchmarks for a given modality before building your configuration.
+</Tip>
+
+## Mixing Modalities in One Run
+
+There is no restriction on combining modalities in a single configuration file. Mill evaluates each model–benchmark pair independently, so a model that supports only text will not be paired with an image benchmark and vice versa. Compatibility is checked at resolution time, before any inference begins, so you will see a clear error if a model and benchmark modalities do not match.
+
+<Note>
+  Mill does support multimodal models — models that accept inputs from more than one modality simultaneously. Multimodal benchmarks declare a list of modalities rather than a single one. See the [Benchmarks](/concepts/benchmarks) page for details on how benchmark modality declarations work.
+</Note>
+
+## Extending Mill with New Modalities
+
+If your use case involves a modality not covered by the four built-in options, Mill exposes an extension API that lets you register a custom modality handler. A custom handler defines how data is loaded, how it is preprocessed into tensors, and how model outputs are post-processed back into a scorable format.
+
+<Note>
+  Custom modality registration is available through Mill's extension API. Once registered, a custom modality behaves identically to a built-in one — it appears in `mill list-benchmarks`, participates in `--modality` filtering, and is fully supported by the pipeline.
+</Note>

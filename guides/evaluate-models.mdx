@@ -1,0 +1,265 @@
+---
+title: "How to Benchmark AI Models Across Modalities with Mill"
+sidebarTitle: "Evaluate Models"
+description: "Run multimodal AI model evaluations using Mill's CLI or Python API. Specify models, benchmarks, output directories, and devices in a single command."
+---
+
+Mill provides a unified evaluation pipeline that benchmarks AI models across text, image, video, and audio modalities in a single consistent workflow. This guide walks you through running your first evaluation — from selecting models and benchmarks to inspecting the results — using either the CLI or the Python API.
+
+## Prerequisites
+
+Before running an evaluation, make sure you have Mill installed and at least one model and benchmark available in your environment. Run `mill list-models` and `mill list-benchmarks` to confirm your setup.
+
+<Steps>
+
+<Step title="Choose your models and benchmarks">
+
+Decide which models you want to evaluate and which benchmarks to run them against. Mill identifies both by slug — short string identifiers you can discover with the list commands.
+
+```bash
+# See all registered models
+mill list-models
+
+# See all registered benchmarks
+mill list-benchmarks
+```
+
+You can filter by modality to narrow down the options:
+
+```bash
+mill list-benchmarks --modality image
+```
+
+</Step>
+
+<Step title="Run the evaluation">
+
+Launch the evaluation with your chosen models and benchmarks. Both the CLI and Python API accept the same logical parameters.
+
+<Tabs>
+  <Tab title="CLI">
+
+Pass model and benchmark slugs as comma-separated values. Use `--output-dir` to control where results land, and `--device` to target a specific compute device.
+
+```bash
+mill evaluate \
+  --models clip-vit-base,openclip-vit-large \
+  --benchmarks imagenet-1k,cifar-100 \
+  --output-dir ./results/vision-run-01 \
+  --device cuda
+```
+
+Common flags:
+
+| Flag | Description | Default |
+|---|---|---|
+| `--models` | Comma-separated model slugs | required |
+| `--benchmarks` | Comma-separated benchmark slugs | required |
+| `--output-dir` | Directory to write result files | `./mill-results` |
+| `--device` | Compute device (`cpu`, `cuda`, `mps`) | `cpu` |
+| `--modality` | Filter to a single modality | all |
+| `--batch-size` | Inference batch size | `32` |
+| `--workers` | Number of data-loading workers | `4` |
+
+  </Tab>
+  <Tab title="Python">
+
+Import the `Evaluator` class and pass lists of model and benchmark slugs. The `run()` method returns a `Results` object you can inspect programmatically.
+
+```python
+from mill import Evaluator
+
+evaluator = Evaluator(
+    models=["clip-vit-base", "openclip-vit-large"],
+    benchmarks=["imagenet-1k", "cifar-100"],
+    output_dir="./results/vision-run-01",
+    device="cuda",
+)
+
+results = evaluator.evaluate()
+print(results.summary())
+```
+
+You can also pass additional keyword arguments to tune batch size and parallelism:
+
+```python
+evaluator = Evaluator(
+    models=["clip-vit-base"],
+    benchmarks=["imagenet-1k"],
+    output_dir="./results",
+    device="cuda",
+    batch_size=64,
+    num_workers=8,
+)
+```
+
+  </Tab>
+</Tabs>
+
+</Step>
+
+<Step title="Target a specific modality">
+
+If you only want to evaluate models on a particular modality, pass the `--modality` flag (CLI) or `modality=` parameter (Python). Mill will automatically skip benchmarks and model heads that don't apply.
+
+<Tabs>
+  <Tab title="CLI">
+
+```bash
+mill evaluate \
+  --models my-vision-model \
+  --benchmarks imagenet-1k,coco-captions \
+  --modality image \
+  --output-dir ./results/image-only
+```
+
+  </Tab>
+  <Tab title="Python">
+
+```python
+from mill import Evaluator
+
+evaluator = Evaluator(
+    models=["my-vision-model"],
+    benchmarks=["imagenet-1k", "coco-captions"],
+    modality="image",
+    output_dir="./results/image-only",
+)
+
+results = evaluator.evaluate()
+```
+
+  </Tab>
+</Tabs>
+
+<Note>
+Supported modality values are `text`, `image`, `video`, and `audio`. Omitting the modality runs all applicable benchmarks for each model.
+</Note>
+
+</Step>
+
+<Step title="Monitor progress during evaluation">
+
+Mill logs progress to stdout by default. Each benchmark emits a progress bar and per-batch metrics as it runs.
+
+For richer monitoring, enable verbose logging or attach a callback:
+
+<Tabs>
+  <Tab title="CLI">
+
+```bash
+mill evaluate \
+  --models clip-vit-base \
+  --benchmarks imagenet-1k \
+  --output-dir ./results \
+  --verbose
+```
+
+  </Tab>
+  <Tab title="Python">
+
+```python
+from mill import Evaluator
+from mill.callbacks import LoggingCallback
+
+evaluator = Evaluator(
+    models=["clip-vit-base"],
+    benchmarks=["imagenet-1k"],
+    output_dir="./results",
+    callbacks=[LoggingCallback(level="debug")],
+)
+
+results = evaluator.evaluate()
+```
+
+  </Tab>
+</Tabs>
+
+<Tip>
+Set the `MILL_LOG_LEVEL=debug` environment variable to get detailed logs without modifying your code.
+</Tip>
+
+</Step>
+
+<Step title="View the results">
+
+Once the run completes, Mill writes a JSON results file to the output directory. Use `mill show-results` to render a human-readable summary in your terminal.
+
+```bash
+mill show-results --output-dir ./results/vision-run-01
+```
+
+To compare multiple runs side by side:
+
+```bash
+mill show-results \
+  --output-dir ./results/vision-run-01 \
+  --compare ./results/vision-run-02 \
+  --format table
+```
+
+To load results programmatically:
+
+```python
+from mill import Results
+
+results = Results.load("./results/vision-run-01")
+print(results.summary())
+
+# Access individual benchmark scores
+for benchmark_name, scores in results.items():
+    print(f"{benchmark_name}: {scores}")
+```
+
+</Step>
+
+</Steps>
+
+## Full example: evaluating a vision model on image benchmarks
+
+The following example runs a complete evaluation of two CLIP variants against a pair of image classification benchmarks, then prints the accuracy scores.
+
+<CodeGroup>
+
+```bash CLI
+mill evaluate \
+  --models clip-vit-base,clip-vit-large \
+  --benchmarks imagenet-1k,cifar-100 \
+  --modality image \
+  --output-dir ./results/clip-comparison \
+  --device cuda \
+  --batch-size 128
+
+mill show-results --output-dir ./results/clip-comparison --format table
+```
+
+```python Python
+from mill import Evaluator, Results
+
+# Run the evaluation
+evaluator = Evaluator(
+    models=["clip-vit-base", "clip-vit-large"],
+    benchmarks=["imagenet-1k", "cifar-100"],
+    modality="image",
+    output_dir="./results/clip-comparison",
+    device="cuda",
+    batch_size=128,
+)
+
+results = evaluator.evaluate()
+
+# Print a summary table
+print(results.summary())
+
+# Inspect a specific metric
+imagenet_scores = results["imagenet-1k"]
+print("ImageNet top-1 accuracy:")
+for model, score in imagenet_scores["top1_accuracy"].items():
+    print(f"  {model}: {score:.2%}")
+```
+
+</CodeGroup>
+
+<Warning>
+Large benchmarks like ImageNet can take significant time on CPU. Always specify `--device cuda` or `--device mps` when a compatible accelerator is available.
+</Warning>

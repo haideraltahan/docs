@@ -1,0 +1,58 @@
+---
+title: "Mill — Unified AI Evaluation Across Every Modality"
+sidebarTitle: "Introduction"
+description: "Mill grinds every modality into one evaluation pipeline. Benchmark text, image, video, and audio models with a single consistent interface."
+---
+
+Mill is a unified evaluation pipeline that lets you benchmark AI models across every modality — text, image, video, and audio — through a single, consistent interface. Instead of juggling a different framework for each modality, Mill gives you one reproducible workflow that produces comparable results regardless of what you are evaluating. Whether you are stress-testing a language model on reasoning benchmarks, measuring an image classifier against standard vision suites, or assessing audio transcription quality, Mill handles the orchestration so you can focus on the results.
+
+<Tip>
+  Mill is an early-stage project under active development. APIs and CLI commands may change between releases. Pin your version in production and check the changelog before upgrading.
+</Tip>
+
+## Get Started
+
+Jump straight into using Mill or explore how it works before diving in.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install Mill and run your first multimodal evaluation in under five minutes using the CLI or Python API.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Set up Mill via pip or from source, configure optional modality extras, and verify your environment.
+  </Card>
+  <Card title="Concepts Overview" icon="map" href="/concepts/overview">
+    Understand the core building blocks — evaluators, benchmarks, models, and result collectors.
+  </Card>
+  <Card title="Evaluate Models" icon="flask" href="/guides/evaluate-models">
+    Follow a step-by-step guide to evaluating your own models against built-in and custom benchmarks.
+  </Card>
+  <Card title="Add a Benchmark" icon="list-check" href="/guides/add-benchmark">
+    Register a custom benchmark using Mill's benchmark registration API.
+  </Card>
+  <Card title="Custom Metrics" icon="ruler" href="/guides/custom-metrics">
+    Implement custom scoring logic with Mill's metric interface and use it in any evaluation run.
+  </Card>
+</CardGroup>
+
+## Why Mill?
+
+Modern AI systems rarely operate on a single modality. A production pipeline might rely on a language model for reasoning, a vision model for perception, and an audio model for transcription — and evaluating each one in isolation, with a different tool and a different reporting format, makes it nearly impossible to compare results or reproduce experiments.
+
+Mill solves this by providing a single evaluation layer that speaks to all of them.
+
+### One Pipeline for Every Modality
+
+Mill ships with built-in support for **text**, **image**, **video**, and **audio** evaluation tasks. You configure your benchmark and your model in the same way regardless of modality. The same `mill evaluate` command — or `Evaluator.evaluate()` in Python — drives every run.
+
+### Reproducible by Design
+
+Every Mill evaluation captures the full configuration at run time: model identifiers, benchmark versions, preprocessing parameters, random seeds, and environment metadata. You can replay any past evaluation exactly, share a run configuration with a colleague, or diff two runs to understand what changed.
+
+### Extensible Benchmarks and Models
+
+Mill's benchmark and model registries are open for extension. Register a custom benchmark using the benchmark registration API, plug in your own model via the model registration API, or define new scoring logic through the custom metric interface. Point Mill at your model's inference endpoint or local weights and your custom setup participates in the same pipeline as every built-in component. No forking required.
+
+<Note>
+  Built-in benchmark coverage grows with each release. Check `mill list-benchmarks` for the current set available in your installed version.
+</Note>

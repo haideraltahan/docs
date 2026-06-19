@@ -1,0 +1,222 @@
+---
+title: "Troubleshooting Common Mill Errors and Performance Issues"
+sidebarTitle: "Troubleshooting"
+description: "Solutions to common Mill errors: missing modules, CUDA out of memory, dataset not found, slow evaluations, empty results, and reproducibility issues."
+---
+
+Most issues with Mill fall into a small number of categories: installation problems, resource constraints, misconfigured paths, or subtle differences in run configuration. This page walks you through the most common errors and how to resolve them. Work through the relevant section below, and if the problem persists, open an issue on the Mill GitHub repository with the output of `mill --version` and the full error traceback.
+
+<AccordionGroup>
+  <Accordion title="ModuleNotFoundError: No module named 'mill'">
+    This error means Python cannot find the Mill package, which is almost always an installation issue.
+
+    **Check that Mill is installed in the active environment:**
+
+    ```bash
+    pip show mill
+    ```
+
+    If the command returns nothing, install Mill:
+
+    ```bash
+    pip install mill
+    ```
+
+    **Check that you are using the correct Python environment.** If you have multiple virtual environments or a conda setup, make sure you activate the environment where Mill is installed before running your script or the `mill` CLI command:
+
+    ```bash
+    # For venv
+    source .venv/bin/activate
+
+    # For conda
+    conda activate my-env
+    ```
+
+    **Verify the CLI resolves to the right environment:**
+
+    ```bash
+    which mill
+    mill --version
+    ```
+
+    <Tip>
+      If you installed Mill with `pip install --user`, the `mill` binary may not be on your `PATH`. Add `~/.local/bin` to your `PATH` variable, or use `python -m mill` instead.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="CUDA out of memory">
+    This error means your GPU does not have enough memory to process the current batch size. The fix is to reduce the amount of data processed per forward pass.
+
+    **Reduce `batch_size`:**
+
+    ```bash
+    mill evaluate --batch_size 8
+    ```
+
+    If you are on a multi-GPU setup, reduce `batch_per_gpu` instead:
+
+    ```bash
+    mill evaluate --batch_per_gpu 4
+    ```
+
+    **Free up GPU memory before running.** Other processes (e.g., a Jupyter notebook kernel or another model) may be holding GPU memory. Check usage with:
+
+    ```bash
+    nvidia-smi
+    ```
+
+    Kill any processes you do not need, then retry.
+
+    **Use a smaller model variant** if your target model offers one — for example, a quantized or distilled checkpoint — while you validate your setup.
+
+    <Note>
+      As a rough starting point, try halving `batch_size` each time you hit an OOM error until the run succeeds, then increase again to find the largest stable value for your hardware.
+    </Note>
+  </Accordion>
+
+  <Accordion title="Benchmark dataset not found">
+    Mill raises this error when it cannot locate a required dataset under `benchmarks_dir`. The default location is `~/.cache/mill/benchmarks`.
+
+    **Check that `benchmarks_dir` points to the right location:**
+
+    ```bash
+    mill evaluate --benchmarks_dir /path/to/your/benchmarks
+    ```
+
+    **Download missing datasets** using Mill's built-in download command:
+
+    ```bash
+    mill download-benchmarks --benchmarks mmbench,seedbench
+    ```
+
+    **On a shared cluster**, the datasets may already exist at a shared path. Ask your system administrator for the location and point `benchmarks_dir` at it in your `mill.yaml`:
+
+    ```yaml
+    benchmarks_dir: /data/shared/mill-benchmarks
+    ```
+
+    <Warning>
+      Make sure the user running the `mill` command has read permissions on `benchmarks_dir` and all subdirectories. Permission errors can surface as "dataset not found" rather than explicit permission denied messages.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Model not found in registry">
+    Mill raises this error when the name you passed to `--models` or `models=` does not match any registered model.
+
+    **List all available model names:**
+
+    ```bash
+    mill list-models
+    ```
+
+    Check your spelling carefully — model names are case-sensitive. For example, `CLIP` and `clip` are different identifiers.
+
+    **If you are using a custom model**, make sure the module that registers it is imported before calling `evaluator.evaluate()`. Registration happens at import time:
+
+    ```python
+    import my_package.models  # triggers @mill.register_model(...)
+    from mill import Evaluator
+
+    evaluator = Evaluator(models=["my-custom-model"], benchmarks=["mmbench"])
+    evaluator.evaluate()
+    ```
+  </Accordion>
+
+  <Accordion title="Evaluation hangs or is very slow">
+    A hung or extremely slow evaluation usually has one of three root causes: a data-loading bottleneck, an incorrect device setting, or a deadlock in the worker processes.
+
+    **Check `device` is set correctly.** If Mill is silently falling back to CPU when you expect GPU, set the device explicitly:
+
+    ```bash
+    mill evaluate --device cuda
+    ```
+
+    Verify GPU utilization with `nvidia-smi` while the run is in progress. If GPU utilization is near zero, inference is happening on CPU.
+
+    **Tune `num_workers`.** Too many workers can cause contention on some filesystems; too few can starve the GPU between batches. Try values between `0` and `8` to find a good setting for your environment:
+
+    ```bash
+    mill evaluate --num_workers 4
+    ```
+
+    Set `--num_workers 0` to disable multiprocessing entirely — this is useful for diagnosing deadlocks, which often appear as an infinite hang with no output.
+
+    **Check for I/O bottlenecks.** If `benchmarks_dir` is on a slow network filesystem, data loading can become the limiting factor. Copy datasets to local SSD storage if possible.
+  </Accordion>
+
+  <Accordion title="Results directory is empty after the run">
+    If `output_dir` exists but contains no files, the evaluation did not write any results. This usually means the run either failed silently or wrote results to a different location.
+
+    **Check the logs for errors.** Run Mill with verbose logging enabled to surface any silent failures:
+
+    ```bash
+    mill evaluate --log_level debug
+    ```
+
+    **Confirm `output_dir` is set correctly.** If you did not explicitly set `output_dir`, results go to `~/.cache/mill/results`. Check there first:
+
+    ```bash
+    ls ~/.cache/mill/results
+    ```
+
+    **Check for partial files.** If the run was interrupted, you may find `.partial` checkpoint files. Re-run the same command — Mill will resume from the last checkpoint rather than starting from scratch.
+
+    **Verify write permissions** on the target directory:
+
+    ```bash
+    ls -la output_dir/
+    ```
+  </Accordion>
+
+  <Accordion title="Import errors after upgrading Mill">
+    Upgrading Mill can occasionally break imports if installed dependencies conflict with the new version requirements.
+
+    **Create a fresh virtual environment** to rule out dependency conflicts:
+
+    ```bash
+    python -m venv .venv-mill
+    source .venv-mill/bin/activate
+    pip install mill
+    ```
+
+    If the import works in the fresh environment, the issue is a conflict in your existing environment. You can identify the conflicting package by comparing dependency trees:
+
+    ```bash
+    pip install pipdeptree
+    pipdeptree --warn fail 2>&1 | grep -i conflict
+    ```
+
+    **Check the Mill changelog** for any dependencies that changed in the version you upgraded to, and install compatible versions explicitly if needed.
+
+    <Warning>
+      Avoid mixing `pip install mill` with manually installed versions of its core dependencies (e.g., PyTorch, transformers). Use the versions pinned or recommended in the Mill release notes for best compatibility.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Inconsistent results between runs">
+    If you get different scores on the same model and benchmark across two runs, the most likely cause is a missing or different `seed` value. Stochastic operations — including data shuffling and certain model components — produce different outputs each time unless seeded.
+
+    **Set an explicit seed** and use it consistently:
+
+    ```bash
+    mill evaluate --seed 42
+    ```
+
+    ```python
+    from mill import Evaluator
+
+    evaluator = Evaluator(seed=42)
+    evaluator.evaluate()
+    ```
+
+    **Other sources of non-determinism to check:**
+
+    - `num_workers > 0` can introduce ordering differences on some systems. Try `--num_workers 0` to eliminate this as a factor.
+    - Floating-point operations on GPU are not always deterministic by default. Results may vary slightly across different GPU hardware or driver versions even with a fixed seed.
+    - Ensure you are using the same model checkpoint. A model downloaded at different times may correspond to different weights if the upstream source was updated.
+
+    <Tip>
+      Record your full `mill.yaml` config — including `seed`, `batch_size`, and `device` — alongside any results you share, so exact reproduction is always possible.
+    </Tip>
+  </Accordion>
+</AccordionGroup>

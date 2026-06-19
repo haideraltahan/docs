@@ -1,0 +1,69 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Mill",
+  "theme": "luma",
+  "colors": {
+    "primary": "#040404"
+  },
+  "favicon": "https://media.brand.dev/56aa9b5d-e2ec-4378-b5f1-ee6d663dbcd5.png",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/overview",
+              "concepts/modalities",
+              "concepts/benchmarks",
+              "concepts/models"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/evaluate-models",
+              "guides/add-benchmark",
+              "guides/add-model",
+              "guides/custom-metrics"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/pipeline",
+              "configuration/outputs"
+            ]
+          },
+          {
+            "group": "Help",
+            "pages": [
+              "help/faq",
+              "help/troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/haideraltahan/Mill"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/haideraltahan/Mill"
+    }
+  }
+}

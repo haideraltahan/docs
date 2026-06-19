@@ -1,0 +1,131 @@
+---
+title: "Models in Mill: Sources, Registration, and Interface"
+sidebarTitle: "Models"
+description: "Mill supports HuggingFace models, local checkpoints, and custom wrappers. Learn how models are registered, discovered, and used in evaluation runs."
+---
+
+In Mill, a model is anything that can accept a modality's preprocessed input and return outputs that a benchmark's metric can score. That definition is deliberately broad: a model can be a pretrained checkpoint pulled from HuggingFace Hub, a fine-tuned model stored on your local filesystem, or a custom Python class you write yourself. As long as it satisfies Mill's model interface, it participates in evaluation runs the same way regardless of where it comes from or how it was built.
+
+## Discovering Registered Models
+
+Mill keeps a model registry that you can inspect at any time. Use `mill list-models` to see every model currently available in your environment:
+
+```bash
+mill list-models
+```
+
+The output shows each model's name, source type, and the modalities it supports. To filter by modality, pass the `--modality` flag:
+
+```bash
+mill list-models --modality audio
+mill list-models --modality image
+```
+
+To see a model's full registration details — including its source path, interface class, and any configuration parameters — pass the `--name` flag:
+
+```bash
+mill list-models --name my-model-name
+```
+
+## Supported Model Sources
+
+Mill supports three model source types. You can mix all three in a single configuration file.
+
+<Tabs>
+  <Tab title="HuggingFace Models">
+    Any model available on the HuggingFace Hub can be referenced directly by its repository identifier. Mill downloads and caches the model automatically on first use.
+
+    ```yaml
+    models:
+      - name: bert-base-uncased
+        source: huggingface
+        repo: bert-base-uncased
+
+      - name: whisper-small
+        source: huggingface
+        repo: openai/whisper-small
+    ```
+
+    Mill uses the model's `config.json` to infer the correct architecture and loads weights via the HuggingFace `transformers` library. Private and gated repositories are supported — set your `HF_TOKEN` environment variable before running.
+
+    <Note>
+      Mill caches downloaded models in the directory pointed to by the `MILL_CACHE_DIR` environment variable, which defaults to `~/.cache/mill`. Subsequent runs that reference the same model identifier skip the download entirely.
+    </Note>
+  </Tab>
+  <Tab title="Local Checkpoints">
+    Point Mill at a directory on your filesystem that contains a saved model. The directory should follow the standard HuggingFace `save_pretrained` layout (a `config.json` alongside weight files), though Mill also supports raw PyTorch `state_dict` checkpoints when you provide an architecture class.
+
+    ```yaml
+    models:
+      - name: my-finetuned-classifier
+        source: local
+        path: /path/to/my/checkpoint
+    ```
+
+    Local checkpoints are resolved at run time, so you can point multiple configuration files at the same checkpoint directory without duplicating files.
+  </Tab>
+  <Tab title="Custom Model Wrappers">
+    When neither a HuggingFace model nor a plain checkpoint fits your needs — for example, when you want to evaluate a model served via an API, or a model with a non-standard architecture — you can write a custom model wrapper class and register it with Mill.
+
+    ```bash
+    mill register model --file my_model.yaml
+    ```
+
+    The YAML file points to your wrapper class and any parameters it needs. Once registered, the custom model appears in `mill list-models` and can be referenced by name in any configuration file exactly like a built-in model source.
+  </Tab>
+</Tabs>
+
+<Tip>
+  Need to wrap a model that doesn't fit any of the built-in source types? See the [Add a Custom Model](/guides/add-model) guide for a step-by-step walkthrough of writing a wrapper class, defining the required interface methods, and registering it with Mill.
+</Tip>
+
+## The Model Interface
+
+Mill interacts with every model through a minimal interface. Whether you are using a HuggingFace model, a local checkpoint, or a custom wrapper, Mill expects the same three capabilities to be present.
+
+<Accordion title="forward(inputs) → outputs">
+  The core inference method. Mill calls this with a batch of preprocessed inputs formatted for the model's modality, and expects back a batch of outputs in a format the benchmark's metric can interpret. For HuggingFace models and local checkpoints, Mill handles the `forward` call automatically. For custom wrappers, you implement this method yourself.
+</Accordion>
+
+<Accordion title="modalities → list[str]">
+  A property or attribute that declares which modalities the model supports (e.g., `["text"]`, `["image"]`, or `["text", "image"]` for multimodal models). Mill reads this at resolution time to validate compatibility with each benchmark before any inference runs.
+</Accordion>
+
+<Accordion title="config → dict">
+  A dictionary of configuration parameters that Mill serializes into the run's `config.yaml`. This ensures that the exact settings used to produce a result — tokenizer choices, image resolution, frame sample rate, and so on — are always captured alongside the scores.
+</Accordion>
+
+<Note>
+  For HuggingFace models and local checkpoints, Mill implements all three interface requirements automatically. You only need to implement them yourself when writing a custom wrapper.
+</Note>
+
+## GPU and Device Selection
+
+Mill automatically detects available hardware and assigns models to devices accordingly. By default, Mill uses CUDA if a GPU is available and falls back to CPU if not.
+
+You can override device selection per model in your configuration:
+
+```yaml
+models:
+  - name: my-large-model
+    source: huggingface
+    repo: meta-llama/Llama-3-8B
+    device: cuda:0
+
+  - name: my-small-model
+    source: local
+    path: /path/to/small-checkpoint
+    device: cuda:1
+```
+
+When running multiple models in a single evaluation, Mill schedules them sequentially by default to avoid out-of-memory errors. Parallel execution across devices can be enabled in your Mill configuration when your hardware supports it.
+
+<Warning>
+  Assigning more models to a single GPU than it has memory to hold will cause an out-of-memory error at load time. Use `mill list-models --name <name>` to check a model's reported memory footprint before scheduling multiple large models on the same device.
+</Warning>
+
+## Model Versioning and Reproducibility
+
+Every model reference in your configuration is recorded verbatim in the run's `config.yaml` and `metadata.json`. For HuggingFace models, Mill also records the exact commit hash of the repository at the time of the run, so you can always trace a result back to the precise model weights that produced it — even if the repository is updated later.
+
+For local checkpoints, Mill records the path and a hash of the checkpoint files. If you need strict reproducibility for local checkpoints, store them in a version-controlled location and commit the path alongside your Mill configuration.

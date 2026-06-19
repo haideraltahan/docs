@@ -1,0 +1,178 @@
+---
+title: "Mill Pipeline Configuration: Parameters and Methods"
+sidebarTitle: "Pipeline Config"
+description: "Configure Mill's evaluation pipeline via CLI flags, Python API, or a YAML config file. Covers models, benchmarks, device, batch size, and output settings."
+---
+
+Mill gives you three equally powerful ways to configure an evaluation run: pass flags directly on the command line, supply keyword arguments to the Python API, or maintain a `mill.yaml` config file that you version-control alongside your experiments. All three approaches accept the same parameter names, so you can mix and match as your workflow evolves — for example, keep stable defaults in `mill.yaml` and override individual values with CLI flags during iterative testing.
+
+## Configuration Methods
+
+<AccordionGroup>
+  <Accordion title="CLI Flags">
+    Pass any parameter as a `--flag` when calling `mill evaluate`. CLI flags take the highest precedence and override both the config file and Python defaults.
+
+    ```bash
+    mill evaluate \
+      --models clip,blip2 \
+      --benchmarks mmbench,seedbench \
+      --device cuda \
+      --batch_size 32 \
+      --seed 42 \
+      --output_dir ./results
+    ```
+  </Accordion>
+
+  <Accordion title="Python API Arguments">
+    When scripting evaluations, instantiate an `Evaluator` and call `evaluate()` with your parameters. This is the recommended approach for programmatic workflows.
+
+    ```python
+    from mill import Evaluator
+
+    evaluator = Evaluator(
+        models=["clip", "blip2"],
+        benchmarks=["mmbench", "seedbench"],
+        device="cuda",
+        batch_size=32,
+        seed=42,
+        output_dir="./results",
+    )
+    results = evaluator.evaluate()
+    ```
+  </Accordion>
+
+  <Accordion title="mill.yaml Config File">
+    Store your configuration in a `mill.yaml` file and pass its path with `--config`. This is ideal for reproducible experiment tracking — commit the file to Git and anyone can reproduce your exact run.
+
+    ```yaml
+    models:
+      - clip
+      - blip2
+
+    benchmarks:
+      - mmbench
+      - seedbench
+
+    device: cuda
+    batch_size: 32
+    num_workers: 4
+    seed: 42
+    output_dir: ./results
+    benchmarks_dir: ~/.cache/mill/benchmarks
+    save_freq: 100
+    ```
+
+    ```bash
+    mill evaluate --config mill.yaml
+    ```
+
+    <Tip>
+      You can still override individual values from a config file using CLI flags. For example, `mill evaluate --config mill.yaml --seed 0` runs with everything from the file except the seed.
+    </Tip>
+  </Accordion>
+</AccordionGroup>
+
+## Parameter Reference
+
+The following parameters control every aspect of a Mill evaluation run. All parameters are optional — Mill applies sensible defaults where possible.
+
+### Model & Benchmark Selection
+
+<ParamField path="models" type="list[str] | 'all'" default="'all'">
+  The models to evaluate. Provide a list of registered model names (e.g., `["clip", "blip2", "llava-1.5"]`) or the string `"all"` to evaluate every model in Mill's registry. Run `mill list-models` to see available names.
+</ParamField>
+
+<ParamField path="benchmarks" type="list[str] | 'all'" default="'all'">
+  The benchmarks to run. Provide a list of benchmark names (e.g., `["mmbench", "mmstar", "seedbench"]`) or `"all"` to run every available benchmark. Run `mill list-benchmarks` to inspect available options.
+</ParamField>
+
+### Compute Settings
+
+<ParamField path="device" type="'cuda' | 'cpu'" default="auto-detected">
+  The compute device to use for inference. Mill auto-detects a CUDA-capable GPU when available and falls back to CPU automatically. Set this explicitly if you need to force a specific device — for example, to benchmark CPU performance or to avoid using a GPU that is reserved for another process.
+</ParamField>
+
+<ParamField path="batch_size" type="int" default="16">
+  The number of samples processed per forward pass. Larger batch sizes improve throughput but require more GPU memory. If you encounter out-of-memory errors, reduce this value. For multi-GPU setups, consider using `batch_per_gpu` instead to keep per-device load consistent.
+</ParamField>
+
+<ParamField path="batch_per_gpu" type="int" default="undefined">
+  Per-GPU batch size for distributed or multi-GPU evaluations. When set, Mill multiplies this value by the number of available GPUs to determine the effective global batch size. Takes precedence over `batch_size` when both are provided.
+</ParamField>
+
+<ParamField path="num_workers" type="int" default="4">
+  The number of parallel worker processes used by the data loader. Increase this value to speed up data loading on machines with many CPU cores. Set it to `0` to load data in the main process — useful when debugging data pipeline issues.
+</ParamField>
+
+### Reproducibility
+
+<ParamField path="seed" type="int" default="0">
+  The global random seed applied to Python's `random` module, NumPy, and PyTorch before each evaluation run. Setting a fixed seed ensures that stochastic operations (sampling, data shuffling) produce identical results across runs. Share this value alongside your results so others can reproduce your numbers exactly.
+</ParamField>
+
+### Storage & Checkpointing
+
+<ParamField path="output_dir" type="str" default="~/.cache/mill/results">
+  The directory where Mill writes evaluation results. Mill creates this directory if it does not already exist. Results are written as structured JSON files organized by model and benchmark name. Set a custom path to keep results alongside your project files.
+</ParamField>
+
+<ParamField path="benchmarks_dir" type="str" default="~/.cache/mill/benchmarks">
+  The directory where Mill looks for benchmark datasets. If a required dataset is not found here, Mill will prompt you to download it. Point this to a shared network path on multi-user clusters to avoid downloading datasets multiple times.
+</ParamField>
+
+<ParamField path="save_freq" type="int" default="50">
+  How often Mill checkpoints intermediate results, measured in evaluation steps. Setting a lower value reduces the amount of work lost if a run is interrupted, at the cost of more frequent disk writes. Set to `0` to disable intermediate checkpointing and only write results at the end of each benchmark.
+</ParamField>
+
+## Configuration Precedence
+
+When you combine multiple configuration methods, Mill resolves values in this order (highest priority first):
+
+<Steps>
+  <Step title="CLI Flags">
+    Flags passed directly to `mill evaluate` always win. Use these for one-off overrides.
+  </Step>
+  <Step title="Python API Arguments">
+    Arguments passed to `Evaluator()` or `evaluator.evaluate()` in your script take second priority.
+  </Step>
+  <Step title="mill.yaml Config File">
+    Values defined in your config file apply when neither a CLI flag nor a Python argument is present.
+  </Step>
+  <Step title="Built-in Defaults">
+    If a parameter is not specified anywhere, Mill falls back to its built-in default.
+  </Step>
+</Steps>
+
+## Full Example
+
+The following example shows a complete `mill.yaml` configuration for a reproducible multimodal evaluation run:
+
+```yaml
+# mill.yaml — full evaluation configuration
+
+models:
+  - clip
+  - blip2
+  - llava-1.5
+  - whisper-large
+
+benchmarks: all
+
+device: cuda
+batch_size: 64
+batch_per_gpu: 16
+num_workers: 8
+seed: 42
+
+output_dir: ./experiments/run-001/results
+benchmarks_dir: /data/shared/mill-benchmarks
+save_freq: 100
+```
+
+```bash
+mill evaluate --config mill.yaml
+```
+
+<Note>
+  Running with `benchmarks: all` on a large model set can take significant time. Consider starting with a targeted subset of benchmarks while you validate your setup, then expanding to a full run once everything is working correctly.
+</Note>

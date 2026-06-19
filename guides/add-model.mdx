@@ -1,0 +1,302 @@
+---
+title: "How to Add a Custom Model to Mill's Evaluation Pipeline"
+sidebarTitle: "Add Model"
+description: "Register custom or fine-tuned models with Mill by implementing the Model interface. Wrap any HuggingFace model or custom checkpoint in a few steps."
+---
+
+Mill's built-in model registry covers popular public checkpoints, but evaluation pipelines frequently need to assess models that live outside that registry — a fine-tuned checkpoint trained on proprietary data, a model served behind an internal API, or an architecture that isn't available on the Hugging Face Hub. The `Model` interface lets you wrap any inference logic so Mill treats it like a first-class model, complete with `mill list-models` visibility and full compatibility with every benchmark.
+
+Common reasons to add a custom model include:
+
+- **Fine-tuned checkpoints** — models you've trained or adapted on internal data.
+- **Proprietary architectures** — models that aren't publicly released.
+- **API-backed models** — inference calls routed through a REST endpoint or SDK.
+- **Ensemble or pipeline models** — multi-stage inference that can't be expressed as a single checkpoint.
+
+<Steps>
+
+<Step title="Create a new Python file for your model">
+
+Create a dedicated file for your model class. A clear convention is `models/my_model.py` inside your project, but any importable module path works.
+
+```bash
+touch models/my_model.py
+```
+
+Like benchmarks, Mill discovers models at import time via the registration decorator. Wire up automatic discovery through your `mill.toml` configuration file (covered in the registration step).
+
+</Step>
+
+<Step title="Implement the Model base class">
+
+Subclass `mill.Model` and implement the two required methods: `load` and `predict`. The `name` property provides the unique slug used in CLI flags and result files.
+
+```python
+# models/my_model.py
+from __future__ import annotations
+
+from typing import Any
+import mill
+from mill import Model
+
+
+@mill.register_model
+class MyFineTunedVisionModel(Model):
+    """A fine-tuned vision model loaded from a local checkpoint."""
+
+    name = "my-finetuned-vit"
+    modality = "image"
+    version = "1.0.0"
+    description = "ViT-B/16 fine-tuned on internal product imagery."
+
+    def load(self, device: str = "cpu") -> None:
+        """Load the model weights into memory.
+
+        Mill calls this once before any inference begins.
+        Use it to load checkpoints, move tensors to the target device, etc.
+        """
+        import torch
+        from transformers import ViTForImageClassification, ViTFeatureExtractor
+
+        checkpoint_path = "./checkpoints/vit-product-v1"
+
+        self.device = device
+        self.feature_extractor = ViTFeatureExtractor.from_pretrained(checkpoint_path)
+        self.model = ViTForImageClassification.from_pretrained(checkpoint_path)
+        self.model.to(device)
+        self.model.eval()
+
+    def predict(self, inputs: list[Any]) -> list[Any]:
+        """Run inference on a batch of inputs and return predictions.
+
+        Mill passes batches whose format matches the benchmark's modality:
+        - image benchmarks  → list of PIL Images or file paths
+        - text benchmarks   → list of strings
+        - audio benchmarks  → list of waveform arrays or file paths
+        - video benchmarks  → list of frame sequences or file paths
+
+        Return a list of predictions in the same order as the inputs.
+        """
+        import torch
+        from PIL import Image
+
+        images = [Image.open(p) if isinstance(p, str) else p for p in inputs]
+        encoding = self.feature_extractor(images=images, return_tensors="pt")
+        encoding = {k: v.to(self.device) for k, v in encoding.items()}
+
+        with torch.no_grad():
+            logits = self.model(**encoding).logits
+
+        predicted_class_ids = logits.argmax(dim=-1).tolist()
+        return [self.model.config.id2label[c] for c in predicted_class_ids]
+```
+
+Key points about each method:
+
+| Method | Purpose |
+|---|---|
+| `load(device)` | Called once before evaluation begins. Load weights and move to `device`. |
+| `predict(inputs)` | Called per batch. Receive inputs, return predictions in matching order. |
+| `name` | Unique string slug used in CLI flags and result files. |
+| `modality` | Declares which modality pipeline this model participates in. |
+
+</Step>
+
+<Step title="Wrap a Hugging Face model">
+
+The pattern above applies directly to any Hugging Face `transformers` model. Here is a more general wrapper you can adapt for text models:
+
+```python
+# models/hf_text_model.py
+from __future__ import annotations
+
+from typing import Any
+import mill
+from mill import Model
+
+
+@mill.register_model
+class MyHuggingFaceTextModel(Model):
+    """Wraps any causal language model from the Hugging Face Hub."""
+
+    name = "my-hf-text-model"
+    modality = "text"
+    version = "1.0.0"
+
+    # Set this to any Hub repo ID or local path
+    checkpoint = "mistralai/Mistral-7B-v0.1"
+
+    def load(self, device: str = "cpu") -> None:
+        import torch
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+
+        self.device = device
+        self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.checkpoint,
+            torch_dtype=torch.float16 if "cuda" in device else torch.float32,
+        )
+        self.model.to(device)
+        self.model.eval()
+
+    def predict(self, inputs: list[str]) -> list[str]:
+        import torch
+
+        encoding = self.tokenizer(
+            inputs,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=512,
+        ).to(self.device)
+
+        with torch.no_grad():
+            output_ids = self.model.generate(
+                **encoding,
+                max_new_tokens=64,
+                do_sample=False,
+            )
+
+        decoded = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+        return decoded
+```
+
+<Tip>
+Override `__init__` if you need to accept constructor arguments (for example, to vary the checkpoint path per experiment) and pass them through `Evaluator(model_kwargs={"my-hf-text-model": {"checkpoint": "..."} })`.
+</Tip>
+
+</Step>
+
+<Step title="Register the model">
+
+The `@mill.register_model` decorator handles registration when the module is imported. Add your module to `mill.toml` so Mill imports it automatically before every run.
+
+```toml
+# mill.toml
+[plugins]
+models = [
+    "models.my_model",
+    "models.hf_text_model",
+]
+```
+
+If you prefer explicit control, import the module before instantiating `Evaluator`:
+
+```python
+import models.my_model  # triggers @register_model
+from mill import Evaluator
+```
+
+Confirm registration with:
+
+```bash
+mill list-models
+# my-finetuned-vit   image   1.0.0   ViT-B/16 fine-tuned on internal product imagery.
+```
+
+</Step>
+
+<Step title="Run evaluation with your custom model">
+
+Your model is now interchangeable with any built-in model. Pass its slug to `--models` (CLI) or `models=` (Python).
+
+```bash
+mill evaluate \
+  --models my-finetuned-vit \
+  --benchmarks imagenet-1k,my-image-classification \
+  --output-dir ./results/finetuned-vit-run \
+  --device cuda
+```
+
+Or via Python:
+
+```python
+from mill import Evaluator
+import models.my_model  # ensure registration
+
+evaluator = Evaluator(
+    models=["my-finetuned-vit"],
+    benchmarks=["imagenet-1k", "my-image-classification"],
+    output_dir="./results/finetuned-vit-run",
+    device="cuda",
+)
+
+results = evaluator.evaluate()
+print(results.summary())
+```
+
+</Step>
+
+</Steps>
+
+## Complete minimal example
+
+The following self-contained script wraps a pretrained HuggingFace image classifier and runs it through a built-in benchmark.
+
+```python
+# run_custom_model.py
+from __future__ import annotations
+
+from typing import Any
+import mill
+from mill import Model, Evaluator
+
+
+@mill.register_model
+class ResNetWrapper(Model):
+    """Wraps microsoft/resnet-50 from the Hugging Face Hub."""
+
+    name = "resnet-50-hf"
+    modality = "image"
+    version = "1.0.0"
+    description = "ResNet-50 loaded via transformers for testing Mill integration."
+
+    def load(self, device: str = "cpu") -> None:
+        from transformers import AutoFeatureExtractor, AutoModelForImageClassification
+        import torch
+
+        self.device = device
+        self.extractor = AutoFeatureExtractor.from_pretrained("microsoft/resnet-50")
+        self.model = AutoModelForImageClassification.from_pretrained(
+            "microsoft/resnet-50"
+        )
+        self.model.to(device).eval()
+
+    def predict(self, inputs: list[Any]) -> list[str]:
+        import torch
+        from PIL import Image
+
+        images = [Image.open(p).convert("RGB") if isinstance(p, str) else p
+                  for p in inputs]
+        encoding = self.extractor(images=images, return_tensors="pt")
+        encoding = {k: v.to(self.device) for k, v in encoding.items()}
+
+        with torch.no_grad():
+            logits = self.model(**encoding).logits
+
+        class_ids = logits.argmax(dim=-1).tolist()
+        return [self.model.config.id2label[c] for c in class_ids]
+
+
+if __name__ == "__main__":
+    evaluator = Evaluator(
+        models=["resnet-50-hf"],
+        benchmarks=["cifar-100"],
+        output_dir="./results/resnet-run",
+        device="cpu",
+    )
+    results = evaluator.evaluate()
+    print(results.summary())
+```
+
+```bash
+python run_custom_model.py
+```
+
+<Warning>
+The `load` method is called on the main process before workers are forked. Avoid storing non-serialisable objects (open file handles, thread locks) as instance attributes, or your multi-worker runs will fail to pickle the model.
+</Warning>
+
+<Note>
+Model slugs must be unique across all registered models. If two models share the same `name`, Mill raises a `DuplicateModelError` at import time.
+</Note>

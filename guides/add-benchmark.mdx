@@ -1,0 +1,248 @@
+---
+title: "Add a Custom Benchmark to Mill's Evaluation Pipeline"
+sidebarTitle: "Add Benchmark"
+description: "Extend Mill with your own benchmarks by implementing the Benchmark interface. Register custom datasets and evaluation metrics in a few steps."
+---
+
+Mill's built-in benchmark library covers common public datasets, but you will often need to evaluate models against proprietary datasets, domain-specific tasks, or evaluation protocols that don't exist yet. The `Benchmark` interface lets you plug any dataset and scoring logic into Mill's pipeline so it behaves identically to a built-in benchmark — including appearing in `mill list-benchmarks` and running through `mill evaluate`.
+
+Common reasons to add a custom benchmark include:
+
+- **Proprietary datasets** — internal holdout sets that can't be shared publicly.
+- **New task types** — tasks not covered by existing benchmarks, such as a custom retrieval or ranking task.
+- **Modified evaluation protocols** — a well-known dataset with different splits, preprocessing, or scoring rules.
+
+<Steps>
+
+<Step title="Create a new Python file for your benchmark">
+
+Create a file for your benchmark class. A good convention is `benchmarks/my_benchmark.py` inside your project, but any importable path works.
+
+```bash
+touch benchmarks/my_benchmark.py
+```
+
+Mill discovers benchmarks at import time, so the file needs to be imported before you call `mill evaluate` or instantiate an `Evaluator`. The registration section below explains how to wire this up automatically.
+
+</Step>
+
+<Step title="Implement the Benchmark base class">
+
+Subclass `mill.Benchmark` and implement the three required methods: `load_data`, `evaluate`, and the `name` property.
+
+```python
+# benchmarks/my_benchmark.py
+from __future__ import annotations
+
+from typing import Any
+import mill
+from mill import Benchmark, BenchmarkDataset
+
+
+@mill.register_benchmark
+class MyImageClassificationBenchmark(Benchmark):
+    """A custom image classification benchmark using an internal dataset."""
+
+    name = "my-image-classification"
+    modality = "image"
+    version = "1.0.0"
+    description = "Internal image classification benchmark with 10 categories."
+
+    def load_data(self) -> BenchmarkDataset:
+        """Return the dataset that models will be evaluated on.
+
+        BenchmarkDataset wraps an iterable of (input, label) pairs.
+        """
+        from my_company.data import load_internal_images
+
+        samples = load_internal_images(split="test")
+        return BenchmarkDataset(
+            samples=samples,        # iterable of dicts with 'input' and 'label' keys
+            num_classes=10,
+            class_names=["cat", "dog", "car", "tree", "building",
+                         "bird", "fish", "flower", "sky", "road"],
+        )
+
+    def evaluate(
+        self,
+        predictions: list[Any],
+        references: list[Any],
+    ) -> dict[str, float]:
+        """Score model predictions against ground-truth labels.
+
+        Returns a dict of metric_name -> float.
+        """
+        correct = sum(p == r for p, r in zip(predictions, references))
+        total = len(references)
+        return {
+            "accuracy": correct / total,
+            "error_rate": 1.0 - correct / total,
+        }
+```
+
+Key points about each method:
+
+| Method | Purpose |
+|---|---|
+| `load_data()` | Returns a `BenchmarkDataset` wrapping your test samples. |
+| `evaluate(predictions, references)` | Scores predictions; must return a `dict[str, float]`. |
+| `name` | Unique string slug used in CLI flags and result files. |
+| `modality` | Tells Mill which modality pipeline to use (`text`, `image`, `video`, `audio`). |
+
+</Step>
+
+<Step title="Add custom data loading logic">
+
+The `load_data` method can pull data from any source — local disk, cloud storage, or a database. Mill does not impose a data format; it only requires that each sample in `BenchmarkDataset` exposes `input` and `label` fields.
+
+```python
+from pathlib import Path
+import json
+from mill import BenchmarkDataset, Sample
+
+def load_data(self) -> BenchmarkDataset:
+    data_path = Path(__file__).parent / "data" / "test_samples.jsonl"
+    samples = []
+
+    with data_path.open() as f:
+        for line in f:
+            record = json.loads(line)
+            samples.append(
+                Sample(input=record["image_path"], label=record["category"])
+            )
+
+    return BenchmarkDataset(samples=samples, num_classes=10)
+```
+
+<Tip>
+Cache expensive data loading operations with `@functools.cached_property` or Mill's built-in `self.cache_dir` attribute so repeated runs don't re-download large datasets.
+</Tip>
+
+</Step>
+
+<Step title="Register the benchmark">
+
+The `@mill.register_benchmark` decorator (used above) registers the class automatically when the module is imported. To make sure Mill always picks it up, add your module to the `plugins` list in your `mill.toml` configuration file.
+
+```toml
+# mill.toml
+[plugins]
+benchmarks = [
+    "benchmarks.my_benchmark",
+]
+```
+
+Alternatively, import the module explicitly before calling `Evaluator`:
+
+```python
+import benchmarks.my_benchmark  # triggers @register_benchmark
+from mill import Evaluator
+
+evaluator = Evaluator(
+    models=["clip-vit-base"],
+    benchmarks=["my-image-classification"],
+    output_dir="./results",
+)
+```
+
+Confirm registration with:
+
+```bash
+mill list-benchmarks
+# my-image-classification   image   1.0.0   Internal image classification benchmark…
+```
+
+</Step>
+
+<Step title="Run the evaluation against your benchmark">
+
+Once registered, your benchmark is a first-class citizen in Mill. Use it exactly like any built-in benchmark.
+
+```bash
+mill evaluate \
+  --models clip-vit-base \
+  --benchmarks my-image-classification \
+  --output-dir ./results/custom-benchmark-run \
+  --device cuda
+```
+
+Or via Python:
+
+```python
+from mill import Evaluator
+import benchmarks.my_benchmark  # ensure registration
+
+evaluator = Evaluator(
+    models=["clip-vit-base"],
+    benchmarks=["my-image-classification"],
+    output_dir="./results/custom-benchmark-run",
+    device="cuda",
+)
+
+results = evaluator.evaluate()
+print(results.summary())
+```
+
+</Step>
+
+</Steps>
+
+## Complete minimal example
+
+The following self-contained script defines a benchmark against a toy dataset and runs it immediately — useful as a starting template.
+
+```python
+# run_custom_benchmark.py
+from __future__ import annotations
+
+from typing import Any
+import mill
+from mill import Benchmark, BenchmarkDataset, Sample, Evaluator
+
+
+@mill.register_benchmark
+class ToyTextBenchmark(Benchmark):
+    """Minimal text benchmark that checks exact-match accuracy."""
+
+    name = "toy-text-exact-match"
+    modality = "text"
+    version = "0.1.0"
+    description = "Tiny toy benchmark for testing Mill integrations."
+
+    def load_data(self) -> BenchmarkDataset:
+        samples = [
+            Sample(input="What is the capital of France?", label="Paris"),
+            Sample(input="What is 2 + 2?",                label="4"),
+            Sample(input="Name a primary color.",          label="red"),
+        ]
+        return BenchmarkDataset(samples=samples)
+
+    def evaluate(
+        self,
+        predictions: list[Any],
+        references: list[Any],
+    ) -> dict[str, float]:
+        correct = sum(
+            str(p).strip().lower() == str(r).strip().lower()
+            for p, r in zip(predictions, references)
+        )
+        return {"exact_match": correct / len(references)}
+
+
+if __name__ == "__main__":
+    evaluator = Evaluator(
+        models=["gpt2"],
+        benchmarks=["toy-text-exact-match"],
+        output_dir="./results/toy-run",
+    )
+    results = evaluator.evaluate()
+    print(results.summary())
+```
+
+```bash
+python run_custom_benchmark.py
+```
+
+<Note>
+Benchmark slugs must be unique across all registered benchmarks (built-in and custom). If two benchmarks share the same `name`, Mill raises a `DuplicateBenchmarkError` at import time.
+</Note>

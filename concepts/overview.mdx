@@ -1,0 +1,80 @@
+---
+title: "How Mill Works: Models, Benchmarks, and Pipeline"
+sidebarTitle: "Overview"
+description: "Understand Mill's three core building blocks — models, benchmarks, and the evaluation pipeline — and how they combine to produce reproducible results."
+---
+
+Mill is a unified evaluation pipeline that lets you benchmark AI models across text, image, video, and audio in a single consistent workflow. Rather than stitching together separate tools for each modality, you define what you want to evaluate — which models and which benchmarks — and Mill handles the rest: data loading, preprocessing, inference, scoring, and result storage, all from one configuration. You kick off a run with a single `mill evaluate` command and inspect the results with `mill show-results`.
+
+## The Three Core Building Blocks
+
+Every Mill evaluation run is built around three concepts that work together.
+
+<CardGroup cols={3}>
+  <Card title="Models" icon="microchip">
+    Any model capable of processing a given modality's input. Mill supports HuggingFace models, local checkpoints, and custom wrappers through a unified interface.
+  </Card>
+  <Card title="Benchmarks" icon="chart-bar">
+    A pairing of a dataset with one or more evaluation metrics. Mill ships with a library of built-in benchmarks and lets you register your own.
+  </Card>
+  <Card title="Evaluation Pipeline" icon="arrow-progress">
+    The orchestration layer that loads models and benchmarks, runs inference, computes scores, and writes results — automatically handling per-modality data differences.
+  </Card>
+</CardGroup>
+
+## How an Evaluation Run Works
+
+When you trigger a Mill evaluation, the pipeline follows a deterministic sequence of steps from your configuration to your final results.
+
+<Steps>
+  <Step title="Define your configuration">
+    You specify which models to evaluate and which benchmarks to run them against. Configuration lives in a single YAML file or can be passed via the CLI, so everything that produced a result is always captured.
+  </Step>
+  <Step title="Mill resolves models and benchmarks">
+    Mill looks up each model and benchmark in its registry. Built-in entries are resolved automatically; custom entries are resolved from the paths you registered. If anything is missing or misconfigured, Mill surfaces the error before any computation begins.
+  </Step>
+  <Step title="Data is loaded and preprocessed per modality">
+    Mill detects the modality of each benchmark and applies the appropriate data loader and preprocessor. You do not need to write loading logic — Mill abstracts away format differences between text corpora, image datasets, video clips, and audio files.
+  </Step>
+  <Step title="Inference runs against each model–benchmark pair">
+    For every combination of model and benchmark in your configuration, Mill feeds the preprocessed inputs through the model and collects its outputs. GPU and device selection is handled according to your environment settings.
+  </Step>
+  <Step title="Scores are computed and results are saved">
+    Each benchmark's metric is applied to the collected outputs. Scores, raw predictions, and run metadata are written to the output directory you configured, in a structured format ready for inspection or downstream analysis.
+  </Step>
+</Steps>
+
+## The Role of Modalities
+
+Mill treats modality as a first-class concept. Each modality — text, image, video, and audio — has its own data loading and preprocessing logic baked into the pipeline. When you add a benchmark, you declare its modality once; from that point on, Mill knows how to handle that benchmark's data without any extra configuration from you.
+
+This design means you can mix modalities freely in a single evaluation run. A configuration that evaluates one model on a text benchmark and another on a video benchmark executes through the same pipeline, with the same result format, using the same commands.
+
+<Note>
+  For a full breakdown of what each modality covers and how data is handled for each, see the [Modalities](/concepts/modalities) page.
+</Note>
+
+## Reproducibility
+
+Mill is designed so that the same configuration always produces the same results. Every run captures the exact model identifiers, benchmark versions, dataset splits, preprocessing parameters, and metric definitions that were used. Re-running an evaluation with the same config file — on the same or a different machine — will reproduce the original results.
+
+<Tip>
+  Commit your Mill configuration files alongside your model code. Because the config fully describes the evaluation, your benchmark results become as reproducible as your training runs.
+</Tip>
+
+## What to Read Next
+
+<CardGroup cols={2}>
+  <Card title="Modalities" icon="layer-group" href="/concepts/modalities">
+    Learn how Mill handles text, image, video, and audio data loading automatically.
+  </Card>
+  <Card title="Benchmarks" icon="chart-bar" href="/concepts/benchmarks">
+    Understand how benchmarks are structured, registered, and scored.
+  </Card>
+  <Card title="Models" icon="microchip" href="/concepts/models">
+    See how to register and use HuggingFace models, local checkpoints, and custom wrappers.
+  </Card>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Run your first Mill evaluation in minutes.
+  </Card>
+</CardGroup>

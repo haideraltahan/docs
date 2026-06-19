@@ -1,0 +1,191 @@
+---
+title: "Mill Quickstart: Run Your First Evaluation in Minutes"
+sidebarTitle: "Quickstart"
+description: "Install Mill and run your first benchmark evaluation in under five minutes. Covers the CLI workflow and the Python Evaluator API end to end."
+---
+
+Mill is designed to get you from a fresh environment to a completed evaluation run as quickly as possible. This guide walks you through installing Mill, exploring available models and benchmarks, running your first evaluation, and inspecting the results — all using either the CLI or the Python API.
+
+<Note>
+  Make sure you have **Python 3.9 or later** installed before you begin. See the [Installation](/installation) page for full environment setup details including GPU and optional modality extras.
+</Note>
+
+## Using the CLI
+
+<Steps>
+  ### Install Mill
+
+  Install Mill from PyPI with a single command.
+
+  ```bash
+  pip install mill
+  ```
+
+  Confirm the installation succeeded by checking the version.
+
+  ```bash
+  mill --version
+  ```
+
+  ### Explore Available Models
+
+  List every model registered in your installed version of Mill to find one you want to evaluate.
+
+  ```bash
+  mill list-models
+  ```
+
+  The output groups models by modality — text, image, video, and audio — along with their identifiers and a short description.
+
+  ```
+  TEXT
+    gpt-text-base        Baseline text generation model
+    bert-classifier      Transformer-based text classifier
+
+  IMAGE
+    resnet-50            ResNet-50 image classifier
+    vit-base             Vision Transformer base variant
+
+  AUDIO
+    whisper-small        Lightweight speech recognition model
+
+  VIDEO
+    videomae-base        Masked autoencoder for video understanding
+  ```
+
+  ### Explore Available Benchmarks
+
+  List every benchmark to see what evaluation suites are ready to use.
+
+  ```bash
+  mill list-benchmarks
+  ```
+
+  Benchmarks are also grouped by modality.
+
+  ```
+  TEXT
+    glue                 General Language Understanding Evaluation
+    hellaswag            Commonsense NLI benchmark
+
+  IMAGE
+    imagenet-val         ImageNet validation set (top-1 / top-5 accuracy)
+    coco-detection       COCO object detection benchmark
+
+  AUDIO
+    librispeech-clean    LibriSpeech clean test set (WER)
+
+  VIDEO
+    kinetics-mini        Kinetics-400 mini split (action recognition)
+  ```
+
+  ### Run Your First Evaluation
+
+  Run an evaluation by specifying a model and a benchmark. Mill handles preprocessing, inference, metric calculation, and result storage automatically.
+
+  ```bash
+  mill evaluate --model resnet-50 --benchmark imagenet-val
+  ```
+
+  You can evaluate across multiple models or benchmarks in a single command by repeating the flags.
+
+  ```bash
+  mill evaluate --model resnet-50 --model vit-base --benchmark imagenet-val
+  ```
+
+  <Tip>
+    Add `--output-dir ./results` to write all artifacts (metrics, logs, configs) to a specific directory. Mill creates the directory if it does not exist.
+  </Tip>
+
+  ### View the Results
+
+  After a run completes, inspect the stored results with the `show-results` command.
+
+  ```bash
+  mill show-results
+  ```
+
+  To display results from a specific run or directory, pass the run ID or path.
+
+  ```bash
+  mill show-results --run-id <run-id>
+  mill show-results --output-dir ./results
+  ```
+
+  Mill prints a formatted table with model names, benchmark names, primary metrics, and run metadata.
+
+  ```
+  ┌─────────────┬───────────────┬─────────────┬──────────────────────┐
+  │ Model       │ Benchmark     │ Metric      │ Score                │
+  ├─────────────┼───────────────┼─────────────┼──────────────────────┤
+  │ resnet-50   │ imagenet-val  │ top-1 acc   │ 76.13%               │
+  │ vit-base    │ imagenet-val  │ top-1 acc   │ 81.07%               │
+  └─────────────┴───────────────┴─────────────┴──────────────────────┘
+  ```
+</Steps>
+
+## Using the Python API
+
+If you prefer to drive evaluations from code — for example, inside a notebook or as part of a larger pipeline — use the `Evaluator` class directly.
+
+```python
+import mill
+from mill import Evaluator
+
+# Create an evaluator with a model and benchmark
+evaluator = Evaluator(
+    model="resnet-50",
+    benchmark="imagenet-val",
+)
+
+# Run the evaluation
+results = evaluator.evaluate()
+
+# Print the primary metric
+print(results.summary())
+```
+
+You can also evaluate multiple models against multiple benchmarks in one call.
+
+```python
+from mill import Evaluator
+
+evaluator = Evaluator(
+    model=["resnet-50", "vit-base"],
+    benchmark=["imagenet-val", "coco-detection"],
+)
+
+results = evaluator.evaluate()
+
+for result in results:
+    print(f"{result.model} | {result.benchmark} | {result.primary_metric}: {result.score:.4f}")
+```
+
+<Tip>
+  Pass `output_dir="./results"` to the `Evaluator` constructor to persist all run artifacts to disk. These artifacts can later be loaded and compared using `mill.load_results()`.
+</Tip>
+
+## Next Steps
+
+Now that you have run your first evaluation, explore what else Mill can do.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Configure optional modality extras, GPU support, and source installation.
+  </Card>
+  <Card title="Concepts Overview" icon="map" href="/concepts/overview">
+    Learn how benchmarks, models, and evaluators fit together in Mill's architecture.
+  </Card>
+  <Card title="Evaluate Models" icon="flask" href="/guides/evaluate-models">
+    Go deeper with custom benchmarks, advanced configuration, and batch evaluation.
+  </Card>
+  <Card title="Add a Benchmark" icon="list-check" href="/guides/add-benchmark">
+    Use the benchmark registration API to bring your own evaluation suite into Mill.
+  </Card>
+  <Card title="Add a Model" icon="cube" href="/guides/add-model">
+    Register a custom model using the model registration API to evaluate your own checkpoints.
+  </Card>
+  <Card title="Custom Metrics" icon="ruler" href="/guides/custom-metrics">
+    Define bespoke scoring logic with the custom metric interface and use it in any run.
+  </Card>
+</CardGroup>

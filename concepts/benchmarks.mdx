@@ -1,0 +1,140 @@
+---
+title: "Understanding Benchmarks in Mill"
+sidebarTitle: "Benchmarks"
+description: "Benchmarks in Mill combine a dataset with evaluation metrics. Learn how built-in and custom benchmarks work, and how results are scored and stored."
+---
+
+A benchmark in Mill is the combination of a dataset and one or more evaluation metrics, packaged together under a single name. When you reference a benchmark in your configuration, Mill knows which data to load, how to feed it to a model, and how to score the model's outputs — all from that one identifier. This pairing is what makes Mill evaluations self-contained: you do not configure datasets and metrics separately; they travel together as a benchmark, so results always reflect a consistent, repeatable evaluation setup.
+
+## What a Benchmark Contains
+
+Every benchmark registered in Mill carries three pieces of information:
+
+<CardGroup cols={3}>
+  <Card title="Dataset" icon="database">
+    The source data used as benchmark inputs. Mill fetches and caches the dataset automatically, whether it lives in the Mill benchmark library, HuggingFace Datasets, or a local directory you specify.
+  </Card>
+  <Card title="Modality" icon="layer-group">
+    The input type the benchmark works with — `text`, `image`, `video`, or `audio`. Mill uses this declaration to select the correct data loader and to validate model compatibility before a run begins.
+  </Card>
+  <Card title="Metric(s)" icon="chart-line">
+    One or more scoring functions applied to the model's outputs. Common examples include accuracy, F1, BLEU, WER, and mAP, but benchmarks can define any deterministic scoring function.
+  </Card>
+</CardGroup>
+
+## Discovering Registered Benchmarks
+
+Mill maintains a benchmark registry that you can inspect at any time. Use `mill list-benchmarks` to see every benchmark currently available in your environment:
+
+```bash
+mill list-benchmarks
+```
+
+The output lists each benchmark's name, modality, dataset source, and primary metric. To narrow the list, filter by modality:
+
+```bash
+mill list-benchmarks --modality text
+mill list-benchmarks --modality video
+```
+
+To inspect a specific benchmark's full definition — including all metrics, dataset split information, and any preprocessing parameters — pass the `--name` flag:
+
+```bash
+mill list-benchmarks --name squad_v2
+```
+
+## Built-in vs. Custom Benchmarks
+
+Mill ships with a curated library of built-in benchmarks covering all four supported modalities. Built-in benchmarks are versioned alongside Mill itself, so upgrading Mill may bring new benchmark versions; your configuration files record which version was used in each run.
+
+<Tabs>
+  <Tab title="Built-in Benchmarks">
+    Built-in benchmarks are available immediately after installing Mill — no extra setup required. They are defined and maintained by the Mill team, with pinned dataset versions and validated metric implementations to ensure consistency across environments.
+
+    Reference a built-in benchmark by name in your configuration:
+
+    ```yaml
+    benchmarks:
+      - name: squad_v2
+      - name: imagenet_top5
+      - name: librispeech_wer
+    ```
+  </Tab>
+  <Tab title="Custom Benchmarks">
+    Custom benchmarks let you evaluate models against your own datasets and metrics. You define a benchmark by creating a benchmark configuration file and registering it with Mill:
+
+    ```bash
+    mill register benchmark --file my_benchmark.yaml
+    ```
+
+    Once registered, a custom benchmark appears in `mill list-benchmarks` alongside built-in ones and can be referenced by name in any configuration file. Custom benchmarks are local to your environment unless you distribute the benchmark file.
+
+    ```yaml
+    benchmarks:
+      - name: my_custom_benchmark   # registered custom benchmark
+      - name: squad_v2              # built-in benchmark
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  Ready to add your own benchmark? See the [Add a Custom Benchmark](/guides/add-benchmark) guide for a step-by-step walkthrough of creating a benchmark configuration file, defining a custom metric, and registering it with Mill.
+</Tip>
+
+## How Benchmark Results Are Scored
+
+When the evaluation pipeline finishes running inference for a model–benchmark pair, it passes the collected model outputs and the corresponding ground-truth labels to the benchmark's metric functions. Scoring is deterministic: given the same outputs and labels, the same score is always produced.
+
+If a benchmark defines multiple metrics, all of them are computed in a single scoring pass. The primary metric is always reported first; secondary metrics appear alongside it in the results.
+
+<Note>
+  Scoring runs entirely locally inside Mill. No model outputs or evaluation data are sent to external services during scoring.
+</Note>
+
+## How Results Are Stored
+
+After scoring, Mill writes results to the output directory specified in your configuration (defaulting to `./mill-results`). Each run produces a structured directory:
+
+```
+mill-results/
+└── <run-id>/
+    ├── config.yaml          # exact configuration used for this run
+    ├── scores.json          # final scores for every model–benchmark pair
+    ├── predictions/
+    │   └── <model>__<benchmark>.jsonl   # raw model outputs per example
+    └── metadata.json        # run timestamp, Mill version, environment info
+```
+
+The `scores.json` file is the primary artifact for most workflows. It contains one entry per model–benchmark pair, with the benchmark name, model name, metric names, and computed values.
+
+```json
+{
+  "runs": [
+    {
+      "model": "my-text-model",
+      "benchmark": "squad_v2",
+      "metrics": {
+        "exact_match": 0.812,
+        "f1": 0.874
+      }
+    }
+  ]
+}
+```
+
+<Warning>
+  Mill does not overwrite existing run directories. Each run receives a unique run ID. If you re-run the same configuration, a new directory is created so previous results are always preserved.
+</Warning>
+
+## Benchmark Versioning
+
+Built-in benchmarks are versioned. If a benchmark's dataset or metric definition changes between Mill releases, the benchmark receives a new version identifier. Your run's `config.yaml` and `metadata.json` both record the exact benchmark version used, so you can always trace a historical result back to the precise evaluation definition that produced it.
+
+To pin a specific version of a benchmark in your configuration, append the version tag:
+
+```yaml
+benchmarks:
+  - name: squad_v2@1.2.0
+```
+
+If you omit the version tag, Mill uses the latest version available in your installed release.
